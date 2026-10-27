@@ -1,5 +1,7 @@
 # ROBAM / ROKI 老板电器 Home Assistant 集成
 
+[![Validate & Test](https://github.com/darkaccount/ha-robam-roki/actions/workflows/validate.yml/badge.svg)](https://github.com/darkaccount/ha-robam-roki/actions/workflows/validate.yml)
+
 将老板电器（ROBAM / ROKI）App 账号下的抽油烟机等智能厨电接入 Home Assistant。
 本项目为开源社区**非官方**集成，支持云端双通道（REST / MQTT）与实时推送，开箱即用。
 
