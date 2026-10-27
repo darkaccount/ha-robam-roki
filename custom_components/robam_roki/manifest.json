@@ -1,0 +1,12 @@
+{
+  "domain": "robam_roki",
+  "name": "ROBAM ROKI",
+  "codeowners": ["@darkaccount"],
+  "config_flow": true,
+  "documentation": "https://github.com/darkaccount/ha-robam-roki",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/darkaccount/ha-robam-roki/issues",
+  "loggers": ["custom_components.robam_roki"],
+  "version": "0.2.0"
+}

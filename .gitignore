@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Credentials
+secrets.yaml
+
+# Local reference material, never distributed
+*.apk

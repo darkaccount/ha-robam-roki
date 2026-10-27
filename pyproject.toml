@@ -1,0 +1,6 @@
+# The bare ``pytest`` command (used in CI) does not put the repo root on
+# sys.path the way ``python -m pytest`` does; this keeps the
+# ``custom_components`` package importable either way.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

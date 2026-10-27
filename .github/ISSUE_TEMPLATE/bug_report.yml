@@ -1,0 +1,42 @@
+name: 🐛 Bug 报告 (Bug Report)
+description: 提交使用过程中遇到的问题或错误
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提交 Bug 报告！请在提交前确保已在 README 和已知限制中查看过相关说明。
+  - type: input
+    id: version
+    attributes:
+      label: 集成版本
+      description: 您正在使用的 robam_roki 集成版本 (例如 v0.2.0)
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant 版本
+      description: 您的 Home Assistant Core 版本 (例如 2024.10.0)
+    validations:
+      required: true
+  - type: input
+    id: device_model
+    attributes:
+      label: 设备型号
+      description: 油烟机或其他设备的具体型号 (例如 R8229)
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 清晰描述您遇到的问题现象及复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误日志与诊断信息
+      description: 请贴出相关报错日志，或在设备页面下载脱敏诊断文件 (Diagnostics JSON) 粘贴于此
+      render: json

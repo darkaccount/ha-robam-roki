@@ -1,0 +1,32 @@
+name: ✨ 新设备/机型适配申请 (Device Support)
+description: 申请支持新的老板电器型号或品类（提供 Diagnostics 诊断信息）
+labels: [enhancement, new-device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎帮助扩大支持设备列表！由于开发者无法拥有全部电器，请提供诊断数据包协助分析。
+  - type: input
+    id: device_model
+    attributes:
+      label: 设备型号与品类
+      description: 机器面板上标注的型号和设备类型（例如 8230S 油烟机 / 9B30C 燃气灶）
+    validations:
+      required: true
+  - type: input
+    id: panel_features
+    attributes:
+      label: 物理面板功能描述
+      description: 面板上有几个档位？是否有爆炒档、照明、延时关机键等？
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics_json
+    attributes:
+      label: 脱敏诊断文件内容 (Diagnostics JSON)
+      description: |
+        请在 Home Assistant 设置 -> 设备与服务 -> ROBAM ROKI -> 点击设备进入 -> 点击「下载诊断信息」。
+        该文件已对您的手机号、Token、GUID 等私密信息自动脱敏，请将内容完整粘贴于此。
+      render: json
+    validations:
+      required: true

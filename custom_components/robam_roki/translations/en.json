@@ -1,0 +1,150 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to ROBAM",
+        "description": "Use the phone number and password of your ROBAM / ROKI account.",
+        "data": {
+          "phone": "Phone number",
+          "password": "Password"
+        }
+      },
+      "devices": {
+        "title": "Select devices",
+        "description": "Select the range hoods to add to Home Assistant.",
+        "data": {
+          "devices": "Devices"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The session for {phone} expired. Enter the password again.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid phone number or password",
+      "cannot_connect": "Cannot reach the ROBAM cloud, try again later",
+      "no_devices_selected": "Select at least one device",
+      "invalid_levels": "Enter positive levels separated by commas, for example 1,2,3,6",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This account is already configured",
+      "no_supported_devices": "No supported range hood was found on this account",
+      "reauth_successful": "Signed in again"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "fault_code": {
+        "name": "Fault code"
+      },
+      "left_head_level": {
+        "name": "Left burner level"
+      },
+      "right_head_level": {
+        "name": "Right burner level"
+      },
+      "left_head_remaining_time": {
+        "name": "Left burner timer remaining"
+      },
+      "right_head_remaining_time": {
+        "name": "Right burner timer remaining"
+      },
+      "left_head_status": {
+        "name": "Left burner status"
+      },
+      "right_head_status": {
+        "name": "Right burner status"
+      },
+      "work_status": {
+        "name": "Work status"
+      },
+      "remaining_time": {
+        "name": "Remaining time"
+      },
+      "work_mode": {
+        "name": "Work mode"
+      },
+      "input_tds": {
+        "name": "Inflow TDS"
+      },
+      "output_tds": {
+        "name": "Outflow TDS"
+      },
+      "filter_life_1": {
+        "name": "Filter 1 life"
+      },
+      "filter_life_2": {
+        "name": "Filter 2 life"
+      },
+      "current_temperature": {
+        "name": "Current temperature"
+      },
+      "target_temperature": {
+        "name": "Target temperature"
+      },
+      "raw_state": {
+        "name": "Raw properties"
+      }
+    },
+    "binary_sensor": {
+      "clean_required": {
+        "name": "Cleaning required"
+      },
+      "online": {
+        "name": "Online"
+      },
+      "left_head_alarm": {
+        "name": "Left burner alarm"
+      },
+      "right_head_alarm": {
+        "name": "Right burner alarm"
+      },
+      "door": {
+        "name": "Door"
+      },
+      "lack_salt": {
+        "name": "Lack of salt"
+      },
+      "lack_rinse": {
+        "name": "Lack of rinse aid"
+      },
+      "purifying": {
+        "name": "Purifying"
+      },
+      "leak_alarm": {
+        "name": "Water leak alarm"
+      },
+      "alarm": {
+        "name": "Alarm"
+      }
+    },
+    "number": {
+      "countdown": {
+        "name": "Countdown"
+      }
+    },
+    "light": {
+      "light": {
+        "name": "Light"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ROKI options",
+        "data": {
+          "levels": "Fan levels (comma separated)",
+          "max_level": "Level count for unknown models (2-6)",
+          "scan_interval": "Polling interval (seconds)",
+          "enable_sse": "Enable real-time push (SSE/MQTT)"
+        }
+      }
+    }
+  }
+}
