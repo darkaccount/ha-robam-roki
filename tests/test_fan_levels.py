@@ -15,6 +15,10 @@ import types
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from homeassistant.exceptions import HomeAssistantError
+
 COMPONENT = (
     Path(__file__).resolve().parents[1] / "custom_components" / "robam_roki"
 )
@@ -41,6 +45,7 @@ def _install_ha_stubs() -> None:
         TURN_ON = 1
         TURN_OFF = 2
         SET_SPEED = 4
+        PRESET_MODE = 8
 
     fan_mod.FanEntity = FanEntity
     fan_mod.FanEntityFeature = FanEntityFeature
@@ -348,3 +353,82 @@ def test_setup_sends_no_commands():
     for model in (*const.MODEL_LEVELS, "R9999"):
         fan.RokiHoodFan(coordinator, {**DEVICE, "dt": model})
     assert coordinator.calls == []
+
+
+# -- gear presets --------------------------------------------------------
+
+
+def test_preset_modes_carry_the_gear_labels():
+    entity = _make_entity()
+    assert entity.preset_modes == ["弱档", "中档", "强档", "爆炒档"]
+    entity = _make_entity("82-i1")
+    assert entity.preset_modes == ["弱档", "强档", "爆炒档"]
+
+
+def test_preset_never_offers_off():
+    # 关档 is the fan's turn_off (and the gear select's job), not a preset.
+    entity = _make_entity()
+    assert "关档" not in entity.preset_modes
+
+
+def test_preset_mode_follows_the_running_gear():
+    entity = _make_entity(properties={"workStatus": 1, "level": 3})
+    assert entity.preset_mode == "强档"
+    entity = _make_entity("82-i1", properties={"workStatus": 1, "level": 6})
+    assert entity.preset_mode == "爆炒档"
+
+
+def test_preset_mode_is_none_when_off():
+    entity = _make_entity(properties={"workStatus": 0, "level": 0})
+    assert entity.preset_mode is None
+
+
+def test_preset_mode_is_none_for_an_unknown_gear():
+    # Never claim a gear the ladder does not list.
+    entity = _make_entity("82-i1", properties={"workStatus": 1, "level": 2})
+    assert entity.preset_mode is None
+
+
+def test_two_gear_preset_mode_reads_weak_and_stir_fry():
+    entity = _make_entity("R66A2", properties={"workStatus": 1, "level": 2})
+    assert entity.preset_mode == "弱档"
+    assert entity.preset_modes == ["弱档", "爆炒档"]
+
+
+def test_set_preset_mode_sets_the_level():
+    entity = _make_entity(properties={"workStatus": 1, "level": 1})
+    asyncio.run(entity.async_set_preset_mode("爆炒档"))
+    assert entity.coordinator.calls == [("level", 6)]
+    assert entity.properties["level"] == 6
+
+
+def test_set_preset_mode_while_off_powers_up_first():
+    entity = _make_entity(properties={"workStatus": 0, "level": 0})
+    asyncio.run(entity.async_set_preset_mode("弱档"))
+    assert entity.coordinator.calls == [("power", True), ("level", 1)]
+
+
+def test_set_preset_mode_rejects_unknown_labels():
+    entity = _make_entity(properties={"workStatus": 1, "level": 1})
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_set_preset_mode("涡轮档"))
+    assert entity.coordinator.calls == []
+
+
+def test_set_preset_mode_rejects_off():
+    entity = _make_entity(properties={"workStatus": 1, "level": 1})
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(entity.async_set_preset_mode("关档"))
+    assert entity.coordinator.calls == []
+
+
+def test_turn_on_with_a_preset_sets_the_gear():
+    entity = _make_entity(properties={"workStatus": 0, "level": 0})
+    asyncio.run(entity.async_turn_on(preset_mode="爆炒档"))
+    assert entity.coordinator.calls == [("power", True), ("level", 6)]
+
+
+def test_turn_on_preset_beats_percentage():
+    entity = _make_entity(properties={"workStatus": 0, "level": 0})
+    asyncio.run(entity.async_turn_on(percentage=50, preset_mode="弱档"))
+    assert entity.coordinator.calls == [("power", True), ("level", 1)]

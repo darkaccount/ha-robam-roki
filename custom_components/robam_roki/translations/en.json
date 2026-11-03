@@ -123,6 +123,16 @@
         "name": "Alarm"
       }
     },
+    "fan": {
+      "hood": {
+        "name": "Exhaust"
+      }
+    },
+    "select": {
+      "gear": {
+        "name": "Gear"
+      }
+    },
     "number": {
       "countdown": {
         "name": "Countdown"

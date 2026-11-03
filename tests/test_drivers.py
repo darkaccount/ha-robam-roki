@@ -34,6 +34,29 @@ def test_driver_factory_resolution():
     assert isinstance(get_driver_for_device(coordinator, {}), HoodDriver)
 
 
+def test_hood_driver_work_status():
+    # The ROKI protocol only reports workStatus 0/1; 延时关机 is derived from
+    # the countdown in the same 131 frame, matching the Huawei A3C5 status
+    # enum (100=关机, 101=开机, 102=延时关机) without inventing a third code.
+    coordinator = MagicMock()
+    guid = "RYYJ000000000001"
+    driver = HoodDriver(coordinator, {"guid": guid, "dc": "RYYJ", "dt": "82-i1"})
+
+    sensor_map = {s.key: s for s in driver.sensors()}
+    value_fn = sensor_map["work_status"].value_fn
+    assert value_fn({"workStatus": 0, "level": 0}) == "关机"
+    assert value_fn({"workStatus": 1, "level": 3, "timing": 0}) == "开机"
+    assert value_fn({"workStatus": 1, "level": 3, "timing": 15}) == "延时关机"
+    # The write API's optimistic state spells it working_status.
+    assert value_fn({"working_status": 1, "timing": 5}) == "延时关机"
+
+    attrs_fn = sensor_map["work_status"].attrs_fn
+    assert attrs_fn({"workStatus": 1, "timing": 15}) == {
+        "raw_status": 1,
+        "countdown": 15,
+    }
+
+
 def test_stove_driver_telemetry():
     coordinator = MagicMock()
     guid = "RRQZ000000000001"
