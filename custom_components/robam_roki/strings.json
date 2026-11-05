@@ -11,7 +11,7 @@
       },
       "devices": {
         "title": "选择设备",
-        "description": "选择要接入 Home Assistant 的油烟机。",
+        "description": "选择要接入 Home Assistant 的设备。",
         "data": {
           "devices": "设备"
         }
@@ -33,7 +33,7 @@
     },
     "abort": {
       "already_configured": "该账号已经配置",
-      "no_supported_devices": "账号下没有找到支持的油烟机",
+      "no_supported_devices": "账号下没有找到可接入的设备（设备需通电并已联网）",
       "reauth_successful": "重新登录成功"
     }
   },
@@ -89,6 +89,18 @@
       },
       "raw_state": {
         "name": "设备属性状态"
+      },
+      "top_temperature": {
+        "name": "上管温度"
+      },
+      "bottom_temperature": {
+        "name": "下管温度"
+      },
+      "stage": {
+        "name": "烹饪段"
+      },
+      "estimated_power": {
+        "name": "估算功率"
       }
     },
     "binary_sensor": {
@@ -121,6 +133,9 @@
       },
       "alarm": {
         "name": "异常警报"
+      },
+      "light": {
+        "name": "炉灯"
       }
     },
     "number": {

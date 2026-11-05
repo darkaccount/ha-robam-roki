@@ -195,7 +195,16 @@ class RobamRokiConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _detect_devices(
         client: RokiClient, devices: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Query each device and keep the ones that expose hood properties."""
+        """Query each device and keep the ones that expose readable properties.
+
+        The old gate required ``level``, which only range hoods report, so an
+        account that owns nothing but an oven aborted the flow with
+        ``no_supported_devices``.  Every device that answers with properties and
+        identifies its category is accepted now; the fan/light/number platforms
+        still filter on ``dc`` so a non-hood appliance cannot grow a fan entity,
+        and devices without ``dc`` keep the old behaviour (accepted only when
+        they look like a hood).
+        """
         supported: list[dict[str, Any]] = []
         for device in devices:
             guid = str(device["guid"])
@@ -206,21 +215,24 @@ class RobamRokiConfigFlow(ConfigFlow, domain=DOMAIN):
                 continue
             if not properties:
                 continue
-            # Hoods expose `level` plus the motor/light state; ovens and
-            # heaters only have `powerState`/`workState`, so this keeps them
-            # out of the fan entities.
-            if "level" not in properties:
-                continue
-            if not any(
-                key in properties
-                for key in (
-                    "workStatus",
-                    "working_status",
-                    "lightStatus",
-                    "light_status",
+            has_category = bool(str(device.get("dc") or "").strip())
+            if not has_category and "level" not in properties:
+                # No category and no hood markers: nothing we could drive.
+                _LOGGER.debug(
+                    "Skipping %s (%s): no dc and no level, keys=%s",
+                    guid,
+                    device.get("name"),
+                    sorted(properties),
                 )
-            ):
                 continue
+            _LOGGER.debug(
+                "Detected %s (%s) dc=%s dt=%s keys=%s",
+                device.get("name"),
+                guid,
+                device.get("dc"),
+                device.get("dt"),
+                sorted(properties),
+            )
             supported.append(
                 {
                     "guid": guid,
