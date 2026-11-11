@@ -45,6 +45,14 @@ def test_known_models_come_from_the_app_views():
     assert const.levels_for_model("R8700") == [2, 6]
 
 
+def test_82_i1_ladder_comes_from_the_huawei_profile():
+    # The same physical 82-i1 (CG5068S) reports these gears through its
+    # Huawei SmartHome A3C5 profile: 0=关, 1=弱档, 3=强档, 6=爆炒档.
+    assert const.levels_for_model("82-I1") == [1, 3, 6]
+    # The device's dt arrives in mixed case.
+    assert const.levels_for_model("82-i1") == [1, 3, 6]
+
+
 def test_unknown_model_falls_back_to_the_default_ladder():
     assert const.levels_for_model("R9999") == const.DEFAULT_LEVELS
     assert const.levels_for_model(None) == const.DEFAULT_LEVELS
@@ -88,9 +96,11 @@ def test_only_verified_models_are_marked_hardware():
         assert model in const.MODEL_LEVELS, model
 
 
-def test_r8229_is_the_only_hardware_verified_model():
-    # R8229 is the one hood this was tested against.
+def test_the_hardware_verified_models():
+    # R8229 was tested against its panel; 82-I1 was confirmed through the
+    # Huawei A3C5 profile of the same physical hood.
     assert const.levels_source_for_model("R8229") == "hardware"
+    assert const.levels_source_for_model("82-i1") == "hardware"
 
 
 def test_other_models_are_marked_apk():
@@ -186,7 +196,7 @@ def test_two_gear_ladder_maps_to_50_and_100():
 
 
 def test_percentage_round_trip_is_stable():
-    for levels in ([1, 2, 3, 6], [2, 6], [1, 6], const.DEFAULT_LEVELS):
+    for levels in ([1, 2, 3, 6], [2, 6], [1, 6], [1, 3, 6], const.DEFAULT_LEVELS):
         for level in levels:
             percentage = _percentage(levels, level)
             assert percentage > 0
@@ -195,3 +205,48 @@ def test_percentage_round_trip_is_stable():
 
 def test_off_level_has_no_percentage():
     assert _percentage([1, 2, 3, 6], 0) is None
+
+
+# -- gear labels ---------------------------------------------------------
+
+
+def test_level_names_match_the_app_and_the_huawei_profile():
+    assert const.level_name(0) == "关档"
+    assert const.level_name(1) == "弱档"
+    assert const.level_name(3) == "强档"
+    assert const.level_name(6) == "爆炒档"
+
+
+def test_82_i1_labels_match_the_huawei_gear_enum():
+    # Huawei A3C5 labels the same unit's gears 弱档/强档/爆炒档; both
+    # integrations must read identically or automations cannot migrate.
+    ladder = const.levels_for_model("82-i1")
+    assert const.level_names_for(ladder) == ["弱档", "强档", "爆炒档"]
+
+
+def test_four_gear_ladder_gets_a_middle_name():
+    assert const.level_names_for([1, 2, 3, 6]) == [
+        "弱档", "中档", "强档", "爆炒档",
+    ]
+
+
+def test_two_button_panels_label_the_low_gear_weak():
+    # FanCtr66A2View/FanCtr8700View call their low button 弱档 even though
+    # it sends level 2; without the ladder hint 2 would read 中档.
+    assert const.level_names_for([2, 6]) == ["弱档", "爆炒档"]
+    assert const.level_names_for([1, 6]) == ["弱档", "爆炒档"]
+
+
+def test_unknown_level_degrades_to_a_numbered_label():
+    assert const.level_name(4, [1, 2, 3, 6]) == "4档"
+
+
+# -- ladder resolution ---------------------------------------------------
+
+
+def test_resolve_levels_precedence():
+    assert const.resolve_levels("R8229", "2,4") == [2, 4]
+    assert const.resolve_levels("R8229", "oops") == [1, 2, 3, 6]
+    assert const.resolve_levels("R8229", None) == [1, 2, 3, 6]
+    assert const.resolve_levels("R9999", None, 4) == [1, 2, 3, 4]
+    assert const.resolve_levels(None, None) == const.DEFAULT_LEVELS

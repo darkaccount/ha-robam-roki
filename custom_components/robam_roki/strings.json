@@ -123,6 +123,16 @@
         "name": "异常警报"
       }
     },
+    "fan": {
+      "hood": {
+        "name": "排风"
+      }
+    },
+    "select": {
+      "gear": {
+        "name": "档位"
+      }
+    },
     "number": {
       "countdown": {
         "name": "倒计时"

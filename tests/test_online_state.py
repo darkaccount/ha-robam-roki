@@ -68,7 +68,14 @@ def _install_stubs() -> None:
     class ConfigEntryAuthFailed(Exception):
         pass
 
+    # Keep the shared tree's exception classes alive: this stub replaces
+    # ``homeassistant.exceptions`` wholesale, and later-collected modules
+    # (test_select_gear) import HomeAssistantError from it.
+    class HomeAssistantError(Exception):
+        pass
+
     exceptions.ConfigEntryAuthFailed = ConfigEntryAuthFailed
+    exceptions.HomeAssistantError = HomeAssistantError
     ha.exceptions = exceptions
 
     helpers = _module("homeassistant.helpers")

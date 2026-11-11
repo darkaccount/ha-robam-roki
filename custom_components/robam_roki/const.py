@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 DOMAIN = "robam_roki"
 
 CONF_PHONE = "phone"
@@ -71,11 +73,20 @@ MODEL_LEVELS: dict[str, list[int]] = {
     "66A2H": [2, 6],
     "R5610": [1, 6],
     "R8700": [2, 6],
+    # 82-i1 (CG5068S) is the one hood in the table whose ladder did not come
+    # from the ROKI app at all: the same physical unit is also exposed through
+    # the Huawei SmartHome integration (product A3C5), whose device profile
+    # declares the gear enum 0=关档, 1=弱档, 3=强档, 6=爆炒档.  The owner uses
+    # that channel daily, so the three gears are hardware behaviour even
+    # though the ROKI-side 131 frame has not been caught carrying them yet.
+    "82-I1": [1, 3, 6],
 }
 
 LEVEL_SOURCES: dict[str, str] = {
     # Owner-confirmed panel settings; 131-frame observation still pending.
     "R8229": "hardware",
+    # Owner-confirmed through the Huawei A3C5 profile of the same unit.
+    "82-I1": "hardware",
 }
 
 # Models whose hood exposes only two gears (a low one and 爆炒).
@@ -87,6 +98,8 @@ TWO_GEAR_MODELS = frozenset({"R66A2", "66A2H", "R8700", "R5610"})
 #
 # The list is not always prefixed with R (``66A2H``, ``90B8Z``, ``8230S``...),
 # and a device's ``dt`` can be either spelling, so both forms are accepted.
+# ``82-I1`` is not in the app list; it is the ``dt`` a real 82-i1 hood reports,
+# added so its ladder row passes the same "matches a device" check.
 KNOWN_MODEL_CODES: frozenset[str] = frozenset(
     {
         "R8700", "R9700", "R8230", "8230S", "5910S", "8231S", "8230C",
@@ -94,7 +107,7 @@ KNOWN_MODEL_CODES: frozenset[str] = frozenset(
         "RR829", "RR826", "RR075", "RR039", "RR028", "RM509", "RS209",
         "RS226", "RS228", "RS275", "RJ312", "RJ321", "RJ320", "RM526",
         "RC906", "66A2H", "R0003", "90B8Z", "90B8X", "KDC01", "9B30C",
-        "HI704", "HS906", "HK906", "R826L", "Q30i1",
+        "HI704", "HS906", "HK906", "R826L", "Q30i1", "82-I1",
     }
 )
 
@@ -134,7 +147,92 @@ def levels_source_for_model(model: str | None) -> str:
         return "apk"
     return "fallback"
 
-PLATFORMS = ["fan", "light", "sensor", "binary_sensor", "number"]
+
+# Chinese gear labels.  The numbers match the labels both the ROKI app's
+# control views and the Huawei SmartHome A3C5 profile use for the same hoods,
+# so the fan presets and the gear select read identically on both channels.
+LEVEL_NAMES: dict[int, str] = {
+    0: "关档",
+    1: "弱档",
+    2: "中档",
+    3: "强档",
+    6: "爆炒档",
+}
+
+
+def level_name(level: int, ladder: Sequence[int] | None = None) -> str:
+    """Chinese label for a gear.
+
+    Two-button panels (``FanCtr66A2View``, ``FanCtr8700View``) label their low
+    button 弱档 whatever its number is -- on those ladders the low gear is 2,
+    which would otherwise read 中档.  Everything else follows
+    :data:`LEVEL_NAMES`; an unknown number degrades to ``"N档"``.
+    """
+    if level <= 0:
+        return LEVEL_NAMES[0]
+    if ladder is not None and len(ladder) == 2 and level == ladder[0]:
+        return LEVEL_NAMES[1]
+    return LEVEL_NAMES.get(level, f"{level}档")
+
+
+def level_names_for(ladder: Sequence[int]) -> list[str]:
+    """Labels for a whole ladder, ascending."""
+    return [level_name(level, ladder) for level in ladder]
+
+
+def parse_levels(value: Any) -> list[int]:
+    """Parse a comma separated ladder such as ``1,2,3,6``.
+
+    Full-width commas (``，``) are accepted because Chinese IMEs produce them.
+    Returns an empty list for anything that is not a clean ascending ladder of
+    positive integers, so a bad option falls through to the model table.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (int, float)):
+        value = [value]
+    if isinstance(value, str):
+        chunks: list[Any] = value.replace("，", ",").split(",")
+    elif isinstance(value, (list, tuple)):
+        chunks = list(value)
+    else:
+        return []
+    levels: list[int] = []
+    for chunk in chunks:
+        text = str(chunk).strip()
+        if not text:
+            continue
+        try:
+            number = int(text)
+        except ValueError:
+            return []
+        if number <= 0 or number in levels:
+            return []
+        levels.append(number)
+    return sorted(levels)
+
+
+def resolve_levels(
+    model: str | None,
+    option: Any = None,
+    max_level: int | None = None,
+) -> list[int]:
+    """The gear ladder for a hood, never touching the device.
+
+    Precedence: an explicit option override, then the static model table, then
+    a linear ``1..max_level`` ladder.  Sending an unsupported level would start
+    the motor, so nothing here may probe the appliance.
+    """
+    override = parse_levels(option)
+    if override:
+        return override
+    known = known_levels_for_model(model)
+    if known:
+        return known
+    return list(range(1, max(2, int(max_level or DEFAULT_MAX_LEVEL)) + 1))
+
+
+PLATFORMS = ["fan", "light", "sensor", "binary_sensor", "number", "select"]
 
 # Cloud endpoints (see api.py).
 BASE_URL = "https://api.myroki.com"

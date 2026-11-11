@@ -14,46 +14,19 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import RokiAuthError, RokiError
 from .const import (
     CONF_LEVELS,
+    CONF_MAX_LEVEL,
     DEFAULT_MAX_LEVEL,
     known_levels_for_model,
+    level_name,
+    level_names_for,
     levels_source_for_model,
+    parse_levels as _parse_levels,
+    resolve_levels,
 )
 from .coordinator import RokiCoordinator
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _parse_levels(value: Any) -> list[int]:
-    """Parse a comma separated ladder such as ``1,2,3,6``.
-
-    Full-width commas (``，``) are accepted because Chinese IMEs produce them.
-    Returns an empty list for anything that is not a clean ascending ladder of
-    positive integers, so a bad option falls through to the model table.
-    """
-    if value is None:
-        return []
-    if isinstance(value, (int, float)):
-        value = [value]
-    if isinstance(value, str):
-        chunks: list[Any] = value.replace("，", ",").split(",")
-    elif isinstance(value, (list, tuple)):
-        chunks = list(value)
-    else:
-        return []
-    levels: list[int] = []
-    for chunk in chunks:
-        text = str(chunk).strip()
-        if not text:
-            continue
-        try:
-            number = int(text)
-        except ValueError:
-            return []
-        if number <= 0 or number in levels:
-            return []
-        levels.append(number)
-    return sorted(levels)
 
 
 async def async_setup_entry(
@@ -63,26 +36,29 @@ async def async_setup_entry(
 ) -> None:
     coordinator: RokiCoordinator = entry.runtime_data.coordinator
     async_add_entities(
-        RokiHoodFan(coordinator, device)
+        RokiHoodFan(coordinator, device, entry.options.get(CONF_MAX_LEVEL))
         for device in coordinator.devices
         if str(device.get("dc", "")).upper() in ("", "RYYJ")
     )
 
 
 class RokiHoodFan(RokiEntity, FanEntity):
-    """A range hood: power plus fan level.
+    """A range hood: power, fan level and gear presets.
 
     The gear ladder comes from a static per-model table (``const.MODEL_LEVELS``),
     an option override, or a linear ``1..max_level`` fallback -- never from the
     device.  Percentage maps onto that ladder, so a R8229 exposes 0 / 33 / 67 /
     100 % for its 1 / 2 / 3 / 6 gears instead of a fake linear 1..6 scale.
+    Preset modes carry the Chinese gear labels (弱档/强档/爆炒档...) that the
+    ROKI app and the Huawei SmartHome integration use for the same hoods.
     """
 
-    _attr_name = None
+    _attr_translation_key = "hood"
     _attr_supported_features = (
         FanEntityFeature.TURN_ON
         | FanEntityFeature.TURN_OFF
         | FanEntityFeature.SET_SPEED
+        | FanEntityFeature.PRESET_MODE
     )
 
     def __init__(
@@ -109,12 +85,9 @@ class RokiHoodFan(RokiEntity, FanEntity):
         then a linear ``1..max_level`` ladder.  Nothing here asks the device
         for anything -- sending an unsupported level would start the motor.
         """
-        override = _parse_levels(self._levels_option)
-        if override:
-            return override
-        if self._model_levels:
-            return list(self._model_levels)
-        return list(range(1, self._max_level + 1))
+        return resolve_levels(
+            self.model_code, self._levels_option, self._max_level
+        )
 
     @property
     def _levels_option(self) -> Any:
@@ -150,6 +123,56 @@ class RokiHoodFan(RokiEntity, FanEntity):
         # two card positions collapse onto the same level.
         return round(100 * (levels.index(level) + 1) / len(levels))
 
+    # -- gear presets ----------------------------------------------------
+
+    @property
+    def preset_modes(self) -> list[str]:
+        """Gear labels for this ladder, e.g. 弱档/强档/爆炒档.
+
+        关档 is deliberately absent: switching off is the fan's turn_off, and
+        the select entity is what offers a combined 关档..爆炒档 list.
+        """
+        return level_names_for(self.levels)
+
+    @property
+    def preset_mode(self) -> str | None:
+        """The running gear's label, or ``None`` when off.
+
+        A reported level outside the ladder yields ``None`` rather than a
+        guess, so the UI never claims a gear the hood did not confirm.
+        """
+        if not self.is_on:
+            return None
+        level = self.prop_int("level")
+        if level <= 0 or level not in self.levels:
+            return None
+        return level_name(level, self.levels)
+
+    def _level_for_preset(self, preset_mode: str) -> int:
+        levels = self.levels
+        names = level_names_for(levels)
+        if preset_mode not in names:
+            raise HomeAssistantError(
+                f"Unknown hood gear {preset_mode!r}; "
+                f"this hood offers: {', '.join(names)}"
+            )
+        return levels[names.index(preset_mode)]
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        level = self._level_for_preset(preset_mode)
+        try:
+            if not self.is_on:
+                await self.coordinator.async_set_power(self._device_id, True)
+            await self.coordinator.async_set_level(self._device_id, level)
+        except RokiAuthError as err:
+            raise HomeAssistantError(f"ROKI session expired: {err}") from err
+        except RokiError as err:
+            raise HomeAssistantError(f"Could not set the fan gear: {err}") from err
+        self.coordinator.async_apply(
+            self._device_id, {"workStatus": 1, "level": level}
+        )
+        self.coordinator.async_schedule_refresh(self._device_id)
+
     # -- commands -------------------------------------------------------
 
     async def async_turn_on(
@@ -162,7 +185,9 @@ class RokiHoodFan(RokiEntity, FanEntity):
             if not self.is_on:
                 await self.coordinator.async_set_power(self._device_id, True)
                 self.coordinator.async_apply(self._device_id, {"workStatus": 1})
-            if percentage is not None:
+            if preset_mode is not None:
+                await self.async_set_preset_mode(preset_mode)
+            elif percentage is not None:
                 await self.async_set_percentage(percentage)
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err

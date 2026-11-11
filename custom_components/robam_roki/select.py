@@ -1,0 +1,130 @@
+"""Gear (档位) select entity for the ROBAM / ROKI integration.
+
+Mirrors the select the Huawei SmartHome integration exposes for the same
+hoods: a flat 关档/弱档/强档/爆炒档 list that automations can target without
+doing percentage arithmetic.  Picking 关档 turns the hood off; picking a gear
+turns it on at that gear, exactly like the app's gear buttons.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.select import SelectEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .api import RokiAuthError, RokiError
+from .const import (
+    CONF_LEVELS,
+    CONF_MAX_LEVEL,
+    level_name,
+    level_names_for,
+    resolve_levels,
+)
+from .coordinator import RokiCoordinator
+from .entity import RokiEntity
+
+_LOGGER = logging.getLogger(__name__)
+
+OFF_OPTION = "关档"
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    coordinator: RokiCoordinator = entry.runtime_data.coordinator
+    async_add_entities(
+        RokiHoodGearSelect(coordinator, device)
+        for device in coordinator.devices
+        if str(device.get("dc", "")).upper() in ("", "RYYJ")
+    )
+
+
+class RokiHoodGearSelect(RokiEntity, SelectEntity):
+    """The hood's gear as a select: 关档 plus every rung of the ladder."""
+
+    _attr_translation_key = "gear"
+    _attr_icon = "mdi:tune-vertical"
+
+    def __init__(self, coordinator: RokiCoordinator, device: dict[str, Any]) -> None:
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{self._device_id}_gear"
+
+    # -- ladder -----------------------------------------------------------
+
+    @property
+    def levels(self) -> list[int]:
+        """Same ladder the fan resolves: option override, table, fallback."""
+        entry = getattr(self.coordinator, "entry", None)
+        option = entry.options.get(CONF_LEVELS) if entry is not None else None
+        max_level = entry.options.get(CONF_MAX_LEVEL) if entry is not None else None
+        return resolve_levels(self.model_code, option, max_level)
+
+    @property
+    def options(self) -> list[str]:
+        return [OFF_OPTION, *level_names_for(self.levels)]
+
+    # -- state ------------------------------------------------------------
+
+    @property
+    def is_on(self) -> bool:
+        return self.prop_int("workStatus", "working_status") != 0
+
+    @property
+    def current_option(self) -> str | None:
+        """关档 when the hood is off, else the running gear's label.
+
+        A reported level outside the ladder yields ``None`` rather than a
+        guess, same as the fan's preset_mode.
+        """
+        if not self.is_on:
+            return OFF_OPTION
+        level = self.prop_int("level")
+        if level <= 0:
+            return OFF_OPTION
+        if level not in self.levels:
+            return None
+        return level_name(level, self.levels)
+
+    # -- commands ---------------------------------------------------------
+
+    async def async_select_option(self, option: str) -> None:
+        if option == OFF_OPTION:
+            try:
+                await self.coordinator.async_set_power(self._device_id, False)
+            except RokiAuthError as err:
+                raise HomeAssistantError(f"ROKI session expired: {err}") from err
+            except RokiError as err:
+                raise HomeAssistantError(f"Could not turn off the hood: {err}") from err
+            self.coordinator.async_apply(
+                self._device_id, {"workStatus": 0, "working_status": 0}
+            )
+            self.coordinator.async_schedule_refresh(self._device_id)
+            return
+
+        levels = self.levels
+        names = level_names_for(levels)
+        if option not in names:
+            raise HomeAssistantError(
+                f"Unknown hood gear {option!r}; "
+                f"this hood offers: {', '.join(self.options)}"
+            )
+        level = levels[names.index(option)]
+        try:
+            if not self.is_on:
+                await self.coordinator.async_set_power(self._device_id, True)
+            await self.coordinator.async_set_level(self._device_id, level)
+        except RokiAuthError as err:
+            raise HomeAssistantError(f"ROKI session expired: {err}") from err
+        except RokiError as err:
+            raise HomeAssistantError(f"Could not set the fan gear: {err}") from err
+        self.coordinator.async_apply(
+            self._device_id, {"workStatus": 1, "level": level}
+        )
+        self.coordinator.async_schedule_refresh(self._device_id)
