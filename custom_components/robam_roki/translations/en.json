@@ -11,7 +11,7 @@
       },
       "devices": {
         "title": "Select devices",
-        "description": "Select the range hoods to add to Home Assistant.",
+        "description": "Select the appliances to add to Home Assistant.",
         "data": {
           "devices": "Devices"
         }
@@ -33,7 +33,7 @@
     },
     "abort": {
       "already_configured": "This account is already configured",
-      "no_supported_devices": "No supported range hood was found on this account",
+      "no_supported_devices": "No supported appliance was found on this account (it must be powered and online)",
       "reauth_successful": "Signed in again"
     }
   },
@@ -89,6 +89,18 @@
       },
       "raw_state": {
         "name": "Raw properties"
+      },
+      "top_temperature": {
+        "name": "Top heater temperature"
+      },
+      "bottom_temperature": {
+        "name": "Bottom heater temperature"
+      },
+      "stage": {
+        "name": "Cooking stage"
+      },
+      "estimated_power": {
+        "name": "Estimated power"
       }
     },
     "binary_sensor": {
@@ -121,6 +133,9 @@
       },
       "alarm": {
         "name": "Alarm"
+      },
+      "light": {
+        "name": "Oven light"
       }
     },
     "fan": {
