@@ -843,6 +843,16 @@ def test_packaging_is_in_sync() -> None:
         (COMPONENT / "manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["version"] == "0.5.0"
+    # hassfest requires 1-3 category keys; custom integrations get a warning
+    # when they are missing, so keep them in the manifest and keep them valid.
+    assert 1 <= len(manifest["categories"]) <= 3
+    for category in manifest["categories"]:
+        assert re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+)?", category)
+
+    # hassfest's [CONFIG_SCHEMA] check: async_setup needs a schema, and the
+    # config-entry-only helper is the documented way to say "UI only".
+    init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+    assert "CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)" in init_source
 
     service_yaml = (COMPONENT / "services.yaml").read_text(encoding="utf-8")
     for field in ("device_id", "guid", "write_fixture"):

@@ -46,11 +46,9 @@ FIXTURE_MARKER_END = "<!-- /roki:fixture-json -->"
 REPO_FIXTURE_DIR = "tests/fixtures/devices"
 REPO_PROFILE_DIR = "custom_components/robam_roki/profiles"
 
-#: The public issue template and repository the export points at.
-ISSUE_TEMPLATE_URL = (
-    "https://github.com/darkaccount/ha-robam-roki/issues/new"
-    "?template=device_support.yml"
-)
+#: The issue template path the export tells people to use; the rest of the URL
+#: is redundant because the document is pasted into this very repository.
+ISSUE_TEMPLATE_PATH = "/issues/new?template=device_support.yml"
 REPOSITORY_URL = "https://github.com/darkaccount/ha-robam-roki"
 
 #: The one privacy promise the document makes, and what it must keep true.
@@ -315,7 +313,7 @@ def build_export_markdown(
             "",
             "## 5. 如何贡献",
             "",
-            f"1. 到 GitHub 提 issue（模板「新设备支持」）：{ISSUE_TEMPLATE_URL}",
+            f"1. 到 GitHub 提 issue（模板「新设备支持」）：{ISSUE_TEMPLATE_PATH}",
             "   把本文件整份贴进去即可，profile 与 fixture 都在里面。",
             "2. 或者直接提 PR：维护者（或你自己）运行",
             "   `python tools/promote_profile.py <本文件>`，它会按第 3、4 节把",

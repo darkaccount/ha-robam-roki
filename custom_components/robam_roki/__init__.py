@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import RokiAuthError, RokiClient, RokiError
@@ -29,6 +30,7 @@ from .const import (
     CONF_USER_ID,
     DEFAULT_ENABLE_SSE,
     DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     PLATFORMS,
 )
 from .coordinator import RokiCoordinator
@@ -41,6 +43,10 @@ from .profiles import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+#: ``async_setup`` registers the integration-wide services, but the integration
+#: is configured through the UI only: YAML setup is rejected by this schema.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 #: Profiles shipped with the integration; replaced on every update.
 _BUILTIN_PROFILES_DIR = Path(__file__).parent / "profiles"

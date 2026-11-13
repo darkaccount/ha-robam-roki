@@ -1843,7 +1843,7 @@ def _export_from_payload(
         verified=verified,
         extends=extends,
         warnings=list(result.warnings),
-        issue_template=exporter.ISSUE_TEMPLATE_URL,
+        issue_template=exporter.ISSUE_TEMPLATE_PATH,
     )
 
 

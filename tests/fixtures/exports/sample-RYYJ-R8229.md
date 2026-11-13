@@ -76,7 +76,7 @@ controls:
 
 ## 5. 如何贡献
 
-1. 到 GitHub 提 issue（模板「新设备支持」）：https://github.com/darkaccount/ha-robam-roki/issues/new?template=device_support.yml
+1. 到 GitHub 提 issue（模板「新设备支持」）：/issues/new?template=device_support.yml
    把本文件整份贴进去即可，profile 与 fixture 都在里面。
 2. 或者直接提 PR：维护者（或你自己）运行
    `python tools/promote_profile.py <本文件>`，它会按第 3、4 节把

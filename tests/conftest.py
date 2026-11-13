@@ -287,6 +287,12 @@ def install_ha_stubs() -> None:
             return selected
 
     config_validation.multi_select = multi_select
+
+    def config_entry_only_config_schema(domain: str) -> dict:
+        """Minimal stand-in: the real one logs when YAML setup is attempted."""
+        return {}
+
+    config_validation.config_entry_only_config_schema = config_entry_only_config_schema
     helpers.config_validation = config_validation
 
     selector = _ensure_package("homeassistant.helpers.selector")

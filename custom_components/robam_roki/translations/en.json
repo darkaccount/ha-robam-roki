@@ -318,7 +318,7 @@
       "draft_enabled": "\"Allow unverified controls\" was enabled and the integration reloaded: the draft {file} is active.",
       "draft_reloaded": "The draft {file} is active (integration reloaded).",
       "draft_written": "The draft {file} was written: reload the integration manually to see the entities.",
-      "export_done": "Export finished: the path is in the persistent notification. Paste that .md into https://github.com/darkaccount/ha-robam-roki/issues/new?template=device_support.yml or open a PR.",
+      "export_done": "Export finished: the path is in the persistent notification. Paste that .md into /issues/new?template=device_support.yml or open a PR.",
       "export_no_profile": "This device has no user profile yet: use \"2. Generate a draft\" first.",
       "export_builtin": "This device is already covered by a built-in profile: open an issue describing the problem instead of exporting.",
       "export_failed": "Export failed; see the Home Assistant log.",

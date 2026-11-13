@@ -318,7 +318,7 @@
       "draft_enabled": "已开启「允许未验证的控制」并重载集成，草稿 {file} 已生效。",
       "draft_reloaded": "草稿 {file} 已生效（集成已重载）。",
       "draft_written": "草稿 {file} 已写入：请手动重载集成后查看实体。",
-      "export_done": "导出完成：文件路径见持久通知。把这份 .md 贴到 https://github.com/darkaccount/ha-robam-roki/issues/new?template=device_support.yml 或直接提 PR。",
+      "export_done": "导出完成：文件路径见持久通知。把这份 .md 贴到 /issues/new?template=device_support.yml 或直接提 PR。",
       "export_no_profile": "该设备还没有用户 profile：先用「2. 生成草稿」。",
       "export_builtin": "该设备已由内置 profile 支持：请直接提 issue 说明问题，不需要导出 profile。",
       "export_failed": "导出失败，详见 Home Assistant 日志。",
