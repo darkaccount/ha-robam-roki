@@ -23,6 +23,8 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
+# Shared protocol constants from the official ROKI Android app: identical
+# for every installation, not user credentials, containing no account data.
 MQTT_HOST = "mqtt.myroki.com"
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 30

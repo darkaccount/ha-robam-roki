@@ -1,8 +1,8 @@
 """Privacy gate for the regression fixtures.
 
-The pre-push gate scans added lines once; this test keeps the fixtures clean at
-commit time, so a real phone number, GUID or token can never land there even if
-the push gate is skipped.
+CI and local test runs both check the fixtures, so a real phone number, GUID
+or token cannot land there undetected. This test does not depend on any local
+hook.
 """
 
 from __future__ import annotations
@@ -69,3 +69,15 @@ def test_the_scanner_catches_other_secret_shapes() -> None:
 
 def test_the_repository_fake_number_is_allowed() -> None:
     assert _violations('{"phone": "' + FAKE_PHONE + '"}') == []
+
+
+#: Ten or more ASCII digits hex-encoded: the App account user id we strip from
+#: captured frames.  It must never reach a fixture, because fixtures are shared.
+_ACCOUNT_ID_HEX = re.compile(r"(?:3[0-9]){10,}")
+
+
+@pytest.mark.parametrize("path", FIXTURE_FILES, ids=lambda path: path.name)
+def test_fixture_files_carry_no_account_id(path: Path) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = _ACCOUNT_ID_HEX.search(text.replace(" ", ""))
+    assert match is None, f"{path.name}: hex-encoded account id {match.group(0)[:24]}..."

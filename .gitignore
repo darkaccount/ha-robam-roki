@@ -10,7 +10,7 @@ secrets.yaml
 # Local reference material, never distributed
 *.apk
 
-# pytest basetemp fallback (sandbox cannot write %TEMP%)
+# pytest temporary directories (local basetemp fallback)
 pytest-of-*/
 
 # Local evidence (frames/logs) kept out of the repo

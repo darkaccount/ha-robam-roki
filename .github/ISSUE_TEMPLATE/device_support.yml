@@ -1,11 +1,18 @@
 name: ✨ 新设备/机型适配申请 (Device Support)
-description: 申请支持新的老板电器型号或品类（提供 Diagnostics 诊断信息）
-labels: [enhancement, new-device]
+description: 申请支持新的老板电器型号或品类（首选用集成导出的贡献包）
+labels: [enhancement, help wanted]
 body:
   - type: markdown
     attributes:
       value: |
-        欢迎帮助扩大支持设备列表！由于开发者无法拥有全部电器，请提供诊断数据包协助分析。
+        欢迎帮助扩大支持设备列表！开发者无法拥有全部电器，所以最有用的是**你设备上的真机证据**。
+
+        **推荐做法**：在集成里走一遍「学习 → 验证 → 导出」：
+        1. 配置 → **1. 学习新设备控制**，用官方 App 操作你要接入的功能；
+        2. 配置 → **2. 生成草稿**，在确认页勾选「开启『允许未验证的控制』并重载」，然后逐个按下新出现的 button 实体，确认效果与 App 一致；
+        3. 配置 → **3. 导出贡献包**，得到一份 `.md`（文件落在 `<配置目录>/robam_roki/exports/`，路径见集成的持久通知）。
+
+        这份 .md 里的 fixture 属性与帧体已脱敏；它还带着你手写的 profile 全文、设备名和配置目录路径，**整份粘贴**前请自己看一眼，确认没有 GUID / 手机号 / token / 账号 id。
   - type: input
     id: device_model
     attributes:
@@ -21,12 +28,27 @@ body:
     validations:
       required: true
   - type: textarea
+    id: export_bundle
+    attributes:
+      label: 贡献包（推荐，.md 全文）
+      description: |
+        把「3. 导出贡献包」生成的那份 .md 整份粘贴进来。里面有设备信息、验证清单、profile 与 fixture，
+        维护者可以直接用 tools/promote_profile.py 落地，不需要再向你要第二份文件。
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
     id: diagnostics_json
     attributes:
-      label: 脱敏诊断文件内容 (Diagnostics JSON)
+      label: 脱敏诊断文件内容 (Diagnostics JSON，备选)
       description: |
-        请在 Home Assistant 设置 -> 设备与服务 -> ROBAM ROKI -> 点击设备进入 -> 点击「下载诊断信息」。
-        该文件已对您的手机号、Token、GUID 等私密信息自动脱敏，请将内容完整粘贴于此。
+        没有走学习模式时，请在 Home Assistant 设置 → 设备与服务 → ROBAM ROKI → 点击设备 → 「下载诊断信息」，
+        该文件已对手机号、Token、GUID 脱敏，把内容粘贴在这里。
+        只有诊断包时，维护者无法确认控制命令，需要额外的人工核对。
       render: json
     validations:
-      required: true
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        > 上面两项请尽量提供一项；两者都提供时优先使用贡献包。两项都留空的话我们无法处理。

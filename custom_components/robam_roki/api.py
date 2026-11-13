@@ -37,6 +37,10 @@ _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://api.myroki.com"
 
+# The constants below are shared protocol values extracted from the official
+# ROKI Android app: the same for every installation, not user credentials,
+# and containing no personal data. They are required to sign in and are
+# intentionally distributed with the integration.
 APP_ID = "roki_app"
 AES_SECRET = b"xoNZXqGLoS2nhtfq"
 SIGN_SECRET = "ee8694419924a22f04ac0e01368683521daa659f"

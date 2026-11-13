@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Build release zip
@@ -14,8 +17,7 @@ jobs:
 
       - name: Create release zip
         run: |
-          cd custom_components/robam_roki
-          zip -r ../../robam_roki.zip ./*
+          zip -r robam_roki.zip custom_components/robam_roki
 
       - name: Upload zip to release assets
         uses: softprops/action-gh-release@v3

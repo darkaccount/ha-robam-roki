@@ -10,14 +10,14 @@ body:
     id: version
     attributes:
       label: 集成版本
-      description: 您正在使用的 robam_roki 集成版本 (例如 v0.2.0)
+      description: 您正在使用的 robam_roki 集成版本 (例如 v0.5.0)
     validations:
       required: true
   - type: input
     id: ha_version
     attributes:
       label: Home Assistant 版本
-      description: 您的 Home Assistant Core 版本 (例如 2024.10.0)
+      description: 您的 Home Assistant Core 版本 (例如 2024.11.0；本集成最低要求 2024.11.0)
     validations:
       required: true
   - type: input
