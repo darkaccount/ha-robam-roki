@@ -46,6 +46,7 @@ def _module(name: str) -> types.ModuleType:
 
 
 NOTIFICATIONS: list[dict[str, Any]] = []
+CALL_LATER: list[dict[str, Any]] = []
 
 
 def _install_stubs() -> None:
@@ -133,18 +134,15 @@ class _FakeClient:
 
 
 class _FakeHass:
+    """Deliberately has NO async_call_later: real HomeAssistant lacks it too.
+
+    The learning timer must come from homeassistant.helpers.event, so this
+    fake keeps the regression honest (the first real-device run failed with
+    AttributeError here).
+    """
+
     def __init__(self) -> None:
-        self.delayed: list[tuple[float, Any]] = []
-        self.cancelled = 0
         self.tasks: list[asyncio.Task[Any]] = []
-
-    def async_call_later(self, delay: float, action: Any) -> Any:
-        self.delayed.append((delay, action))
-
-        def _cancel() -> None:
-            self.cancelled += 1
-
-        return _cancel
 
     def async_create_task(self, coro: Any) -> asyncio.Task[Any]:
         task = asyncio.ensure_future(coro)
@@ -155,6 +153,40 @@ class _FakeHass:
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
             self.tasks.clear()
+
+
+def _ensure_event_stub() -> types.ModuleType:
+    """Register the real HA timer helper shape: async_call_later(hass, ...).
+
+    Other test modules replace homeassistant.helpers.event while they are
+    imported, so re-register it before every learning test.
+    """
+    helpers = sys.modules.get("homeassistant.helpers") or _module(
+        "homeassistant.helpers"
+    )
+    sys.modules["homeassistant.helpers"] = helpers
+    event = sys.modules.get("homeassistant.helpers.event") or _module(
+        "homeassistant.helpers.event"
+    )
+    sys.modules["homeassistant.helpers.event"] = event
+    helpers.event = event
+
+    def async_call_later(hass: Any, delay: float, action: Any) -> Any:
+        entry = {
+            "hass": hass,
+            "delay": delay,
+            "action": action,
+            "cancelled": False,
+        }
+        CALL_LATER.append(entry)
+
+        def _cancel() -> None:
+            entry["cancelled"] = True
+
+        return _cancel
+
+    event.async_call_later = async_call_later
+    return event
 
 
 def _ensure_notifications() -> None:
@@ -186,6 +218,7 @@ def _make_coordinator(
     data: dict[str, dict[str, Any]] | None = None,
 ) -> Any:
     _ensure_notifications()
+    _ensure_event_stub()
     instance = object.__new__(RokiCoordinator)
     instance.entry = types.SimpleNamespace(
         options={}, data={}, entry_id="test"
@@ -222,8 +255,10 @@ async def _stop(coordinator: Any) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _clear_notifications() -> Any:
     NOTIFICATIONS.clear()
+    CALL_LATER.clear()
     yield
     NOTIFICATIONS.clear()
+    CALL_LATER.clear()
 
 
 # -- frame filtering -----------------------------------------------------
@@ -407,14 +442,104 @@ def test_the_duration_is_clamped_to_ten_minutes() -> None:
     asyncio.run(scenario())
 
 
+def test_learn_start_works_without_hass_async_call_later() -> None:
+    # Regression for the real-device AttributeError: HomeAssistant has no
+    # async_call_later method, the timer must come from helpers.event.
+    async def scenario() -> None:
+        coordinator = _make_coordinator()
+        assert not hasattr(coordinator.hass, "async_call_later")
+        result = coordinator.learn_start(GUID)
+        assert result["device_id"] == GUID
+        assert CALL_LATER and CALL_LATER[-1]["hass"] is coordinator.hass
+        await coordinator.learn_stop()
+
+    asyncio.run(scenario())
+
+
+def test_the_default_duration_is_five_minutes() -> None:
+    async def scenario() -> None:
+        coordinator = _make_coordinator()
+        coordinator.learn_start(GUID)
+        state = coordinator._learn
+        assert state["deadline"] - state["started_at"] == timedelta(
+            seconds=const.LEARN_DEFAULT_SECONDS
+        )
+        assert CALL_LATER[-1]["delay"] == const.LEARN_DEFAULT_SECONDS
+        await coordinator.learn_stop()
+
+    asyncio.run(scenario())
+
+
+def test_the_app_read_frames_are_not_recorded() -> None:
+    # Real-device capture: 60+ of 68 recorded "actions" were 130 (poll) and
+    # 128 (query) frames sent by the App itself.
+    async def scenario() -> None:
+        coordinator = _make_coordinator()
+        coordinator.learn_start(GUID, 60)
+        for command in (130, 134, 130, 128, 132):
+            coordinator._handle_mqtt_message(
+                _topic(), _frame(OTHER_APP_GUID, command, b"\x01")
+            )
+        result = await _stop(coordinator)
+        assert [action["command"] for action in result["actions"]] == [
+            134,
+            132,
+        ]
+        groups = coordinator.learned_controls(GUID)
+        assert [frame["command"] for frame in groups[0]["frames"]] == [
+            134,
+            132,
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_a_read_frame_does_not_keep_the_action_group_open() -> None:
+    async def scenario() -> None:
+        coordinator = _make_coordinator()
+        clock = [100.0]
+        original = coordinator_module.time.monotonic
+        coordinator_module.time.monotonic = lambda: clock[0]
+        try:
+            coordinator.learn_start(GUID, 60)
+            clock[0] += 1.0
+            coordinator._handle_mqtt_message(
+                _topic(), _frame(OTHER_APP_GUID, 132, b"\x01")
+            )
+            clock[0] += 1.0
+            coordinator._handle_mqtt_message(
+                _topic(), _frame(OTHER_APP_GUID, 134, b"\x02")
+            )
+            clock[0] += 2.9  # a poll in between: ignored, must not refresh
+            coordinator._handle_mqtt_message(
+                _topic(), _frame(OTHER_APP_GUID, 130, b"")
+            )
+            clock[0] += 0.2  # 3.1 s after 134: a real group boundary
+            coordinator._handle_mqtt_message(
+                _topic(), _frame(OTHER_APP_GUID, 136, b"\x03")
+            )
+            await _stop(coordinator)
+        finally:
+            coordinator_module.time.monotonic = original
+        groups = coordinator.learned_controls(GUID)
+        assert len(groups) == 2
+        assert [frame["command"] for frame in groups[0]["frames"]] == [
+            132,
+            134,
+        ]
+        assert [frame["command"] for frame in groups[1]["frames"]] == [136]
+
+    asyncio.run(scenario())
+
+
 def test_the_timeout_callback_stops_the_session() -> None:
     async def scenario() -> None:
         coordinator = _make_coordinator()
         coordinator.learn_start(GUID, 60)
-        delay, action = coordinator.hass.delayed[-1]
-        assert delay == 60
-        assert asyncio.iscoroutinefunction(action)
-        await action(None)
+        entry = CALL_LATER[-1]
+        assert entry["delay"] == 60
+        assert asyncio.iscoroutinefunction(entry["action"])
+        await entry["action"](None)
         assert coordinator.learn_active() is False
         # The end notification explains the empty result and its fallback.
         message = NOTIFICATIONS[-1]["message"]
@@ -431,7 +556,7 @@ def test_a_reload_clears_the_buffer() -> None:
         assert coordinator.learn_active() is True
         await coordinator.async_stop_push()
         assert coordinator.learn_active() is False
-        assert coordinator.hass.cancelled == 1
+        assert CALL_LATER[-1]["cancelled"] is True
 
     asyncio.run(scenario())
 

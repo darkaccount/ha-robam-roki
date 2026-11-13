@@ -1,8 +1,8 @@
-# YAML profiles（只读遥测）
+# YAML profiles（设备描述与实验性控制）
 
 本文说明 `custom_components/robam_roki/profiles/` 与用户目录里的 YAML profile：它解决什么问题、文件放哪、字段怎么填、冲突时谁赢、日志怎么读。
 
-> P1 阶段 profile **只读**：只会生成 sensor / binary_sensor，永远不会生成 fan / light / number / select，也不会向设备发送任何命令。
+> **0.5.0 起 profile 可以声明控制**：`controls` 段支持 `kind: property` / `invoke` / `mqtt`；学习模式学到的动作会自动写成 `kind: mqtt`，并以 **button（按钮）** 实体出现，点一下发送那一帧（详见 4.6）。未验证的控制（`verified: false`）默认**不生成实体**，需要先在集成选项里打开「允许未验证的控制」，生成出来的实体会带 `experimental: true` 属性。没有 `controls` 时行为与以前一致：只生成 sensor / binary_sensor，不发任何命令。
 
 ## 1. 它解决什么问题
 
@@ -62,7 +62,7 @@ sensors:
 | `name` | 否 | 字符串 | profile 名称（设备类别名，也用于继承时的回退） |
 | `sensors` | 否 | 映射 | 每个 key 一个传感器条目 |
 | `binary_sensors` | 否 | 映射 | 每个 key 一个二元传感器条目 |
-| `controls` | 否 | 映射 | **P1 预留，不会生效** |
+| `controls` | 否 | 映射 | 每个 key 一个控制条目；可执行的那几条以 button 实体出现（见 4.6） |
 
 ### 4.2 match
 
@@ -97,29 +97,82 @@ sensors:
 | `on_values` | 列表 | 属性值命中这些值时为 on；省略则按真值判断 |
 | `name` / `icon` / `device_class` / `entity_category` | 同上 | 展示字段 |
 
-### 4.5 controls（P1 预留）
+### 4.5 controls（控制能力）
 
-字段与 `devices/base.py` 的 `CommandSpec` 对齐；P1 只解析校验，不会生效（不生成控制实体、不发命令）：
+字段与 `devices/base.py` 的 `CommandSpec` 对齐。控制条目只有在 `verified: true`，或用户打开了「允许未验证的控制」选项时才会生成实体；至于生成成什么实体，由 `kind` 决定，见 4.6。
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| `kind` | `property` / `invoke` | 必填，否则该控制条目被跳过 |
-| `on` / `off` | 映射 | property 的写入负载 |
-| `function` | 字符串或整数 | invoke 的协议函数号 |
-| `param` | 字符串 | invoke 的参数名 |
-| `params` | 映射 | invoke 的额外参数 |
-| `verified` | 布尔 | 是否已在真机验证 |
+| `kind` | `property` / `invoke` / `mqtt` | 必填，缺省或非法时该条目被跳过并记日志 |
+| `name` | 字符串 | 可选，按钮实体的显示名；省略时用 key（例如学习生成的 `action_1`） |
+| `on` / `off` | 映射 | `property`：开 / 关时写入的属性与值 |
+| `function` | 字符串或整数 | `invoke`：云端协议函数号 |
+| `param` | 字符串 | `invoke`：把实体传入的值放到这个参数名 |
+| `params` | 映射 | `invoke`：固定附加参数 |
+| `command` | 0–255 | `mqtt`：命令字节 |
+| `body_hex` | 十六进制字符串 | `mqtt`：帧体；偶数长度、≤ 64 字节；外层信封（源地址、terminal、user id）由集成补齐 |
+| `verified` | 布尔，默认 true | 是否已在真机验证；false 时受实验开关控制 |
+
+示例（MQTT 设备；key 建议避开 `power`/`level`/`light`/`timing`，那四个由专用平台负责，写成同名会覆盖它们的命令而不是多出一个按钮）：
+
+~~~yaml
+controls:
+  lamp:
+    kind: mqtt
+    command: 132
+    body_hex: "01"
+    verified: false
+~~~
+
+示例（REST 设备）：
+
+~~~yaml
+controls:
+  cavity_light:
+    kind: property
+    on: {light_status: 1}
+    off: {light_status: 0}
+    verified: false
+~~~
 
 YAML 小坑已由加载器处理：PyYAML 会把裸写的 `on:` / `off:` 解析成布尔键，加载时归一化回 `"on"`/`"off"`；`param: on` 这类布尔标量也会还原成 `"on"`。加不加引号等价。
+
+### 4.6 controls 会生成什么实体
+
+控制条目按 `kind` 决定有没有实体。能「一键发送」的变成 **button（按钮）**，需要传值的和走 REST 写接口的暂时只保留声明，不生成实体：
+
+| `kind` | 生成的实体 | 说明 |
+| :--- | :--- | :--- |
+| `mqtt` | **button** | 点一下发送这一帧（命令号 + `body_hex`） |
+| `invoke`，没写 `param` | **button** | 点一下调用这个云端函数，`params` 原样附上 |
+| `invoke`，写了 `param` | 暂无 | 需要用户先输入一个值，等专用平台（P4） |
+| `property` | 暂无 | 走云端属性写接口（REST 通道），P4 才接 |
+
+- 按钮实体的 `unique_id` 是 `{设备 GUID}_control_{key}`，与 sensor 的 `{设备 GUID}_{key}` 区分开，不会互相顶掉；实体名取 `name`，没有就用 key。
+- `power` / `level` / `light` / `timing` 这四个 key 由 fan / select / light / number 平台负责，**不会**再生成按钮，同一能力不会重复出现。
+- `verified: false` 的控制只有在打开「允许未验证的控制」后才会出现，且按钮的 `extra_state_attributes` 带 `experimental: true`。
+- 声明控制不会影响原有实体：`extends: python:<驱动>` 的 profile 会保留驱动全部命令（油烟机仍有风机/灯光/档位/倒计时）；不写 `controls` 的只读 profile `commands()` 仍然为空。
+- 参数的学习结果示例（学习模式自动生成的就是这一种）：
+
+~~~yaml
+controls:
+  action_1:
+    kind: mqtt
+    command: 132
+    body_hex: "01"
+    verified: false
+~~~
+
+重载集成后，打开实验开关即可看到一个名为 `action_1` 的按钮实体（`button.<设备>_action_1`）；点一下发送命令 132，帧体 `01`。
 
 ## 5. 优先级与合并规则
 
 1. **用户 > 内置**；
 2. 同一来源内：`dt` 精确匹配 > `dt` 列表包含 > 仅 `dc`；
 3. 同精度冲突：记 warning，按文件名排序取第一个；
-4. `extends` 合并：按 section（sensors / binary_sensors / controls）浅合并，**同名 key 整条替换**，不递归合并字段；
+4. `extends` 合并：按 section（sensors / binary_sensors / controls）浅合并，**同名 key 整条替换**，不递归合并字段；`controls` 对内置驱动的命令表也是同一语义——同名 key 用 profile 的整条命令覆盖驱动的那一条（例如把 `level` 换成自己抓到的帧），其它命令原样保留；
 5. profile 覆盖驱动已有 key 时：只替换你写出的字段。只写 `name`/`icon` 等展示字段 → 取值逻辑保持驱动原样；写了 `keys` → 取值逻辑也由 profile 接管；
-6. `extends: python:<name>` 继承内置驱动，可用名称：`hood`、`thermal`、`steam_oven`、`oven`、`microwave`、`sterilizer`、`stove`、`dishwasher`、`water_purifier`、`generic`。
+6. `extends: python:<name>` 继承内置驱动，可用名称：`hood`、`thermal`、`steam_oven`、`oven`、`microwave`、`sterilizer`、`generic`（灶具/洗碗机/净水器自 0.5.0 起由内置 YAML profile 提供，不再有同名 Python 驱动）。
 
 ## 6. 三个完整示例
 
@@ -219,19 +272,32 @@ sensors:
 | `profile conflict` | 同来源、同精度多个 profile 同时命中，按文件名取第一个 |
 | `profiles: builtin=... user=...` | 启动时的 profile 统计；user 后面带 `(missing)` 说明目录不存在 |
 | `unknown device_class` / `unknown entity_category` | HA 枚举值写错，该字段被忽略 |
+| `control ... skipped` / `invalid control` | 某条 `controls` 条目无法变成命令（`invoke` 缺 `function`、`mqtt` 缺命令号或 body 非法），只跳过这一条，设备其它命令照旧 |
+| `kind=property needs on and off` | `property` 控制必须同时写 `on` 与 `off`，否则只跳过该条 |
 
 ## 8. 安全边界
 
-- profile 生成的一切都是**只读**的：`commands()` 恒为空，因此不会出现控制实体，也不会向设备发送命令。
+- profile 的写能力**只来自显式声明**：只有 `controls` 里写出的 `kind: mqtt`（或未带 `param` 的 `invoke`）才会生成 button 实体，并且只在**按下按钮**时发送命令。不写 `controls` 的 profile（内置的灶具 / 洗碗机 / 净水器就是这种）`commands()` 为空，不生成任何控制实体，也不会向设备发送命令。
+- 加载 profile 只生成实体：setup、重载、生成草稿都不发送任何命令。
+- 未验证的控制默认隐藏：`verified: false` 的控制不生成实体；即使有旧实体尝试发送，执行器也会拒绝，除非打开「允许未验证的控制」。
 - 不主动探测设备：取值只读 coordinator 已经缓存的属性。
-- `controls` 在 P1 只解析、校验，不会生效；等真机验证后才会进入 P2/P3。
-- 未知属性名不会报错，只是取不到值时按 `default`/`None` 处理。
+- 未知属性名不会报错，只是取不到值时按 `default`/`None` 处理；单条控制写坏只会跳过那一条并记 warning，不影响设备其它命令。
 
 ## 9. 自助接入（不用写代码）
 
 拿到 profile 的三条路径，按门槛从低到高：
 
-### 9.1 Home Assistant 服务（推荐）
+### 9.1 学习模式（推荐，先学再做）
+
+1. 开发者工具 → 操作 → `robam_roki.learn_start`，选设备（可选 `duration`，默认 600 秒，最长 600 秒）。
+2. 用官方 App 操作你要接入的功能（开关、档位、模式……）。集成只记录**官方 App 发往这台设备**的命令帧：设备自己的上报、以及本集成自己发出的命令都会被排除；学习期间**不发送任何命令**。
+3. `robam_roki.learn_stop` 结束（或等它自动超时）。通知里会列出学到几个动作、命令号与 body、以及每组观察到的属性变化。
+4. 再走下面的 `draft_profile`，草稿里会**自动生成** `controls`（`verified: false`，每个动作一条 `action_N`），不用手抄命令号。
+5. 把草稿放到用户 profile 目录 → 打开「允许未验证的控制」→ 重载。学到的动作这时会以 **button** 实体出现（见 4.6），点一下就是官方 App 当初发的那一帧；确认可用后把对应条目的 `verified` 改成 `true` 再分享。
+
+如果学习了 0 个动作（例如 REST 设备，App 走 HTTPS 抓不到），通知会给出命令行 fallback 的完整命令。
+
+### 9.2 Home Assistant 服务（生成草稿）
 
 前提：集成已经添加并正常轮询。草稿只使用**已缓存**的属性，不会为了生成草稿请求云端，也不会向设备发命令。
 
@@ -249,9 +315,9 @@ sensors:
 
 同名文件不会被覆盖：再次生成会追加 `-2`、`-3`。
 
-下一步：编辑草稿（把注释建议改成真实字段、按需把布尔属性移入 `binary_sensors`）→ 设置 → 设备与服务 → ROBAM ROKI → 重新加载 → 查看实体。
+下一步：编辑草稿（把注释建议改成真实字段、按需把布尔属性移入 `binary_sensors`）→ 设置 → 设备与服务 → ROBAM ROKI → 重新加载 → 查看实体。草稿里的 `controls` 如果是学习生成的 `kind: mqtt`，重载后会变成 button 实体（需先打开「允许未验证的控制」，见 4.6）。
 
-### 9.2 命令行（可选）
+### 9.3 命令行（可选）
 
 需要本机 Python 与依赖：
 
@@ -269,12 +335,12 @@ python tools/roki_cli.py draft bundle.json --out profiles/
 python tools/roki_cli.py draft diagnostics.json --dc RYYJ --dt R8229
 ~~~
 
-### 9.3 Issue 反馈
+### 9.4 Issue 反馈
 
 只有诊断 JSON 时也可以直接附到 GitHub Issue（`device_support.yml` 模板）。维护者会用 `draft` 生成 profile + fixture 并加入本仓库。
 
-### 9.4 隐私与安全
+### 9.5 隐私与安全
 
-- 服务与 CLI 都只读缓存 / 只发只读轮询，不发送任何控制命令。
+- 采集与生成草稿的过程只读缓存 / 只发只读轮询，不发送任何控制命令；唯一的写动作是用户手动按下 button 实体。
 - 草稿与 fixture 的 properties 在写入前脱敏，重复脱敏幂等。
-- 生成的 `controls` 段全部是注释；当前版本不会生效。
+- 没有学习结果时草稿的 `controls` 段是注释模板；有学习结果时生成 `kind: mqtt` 条目（`verified: false`），重载后按 4.6 显示为 button 实体，且要先打开「允许未验证的控制」才可见、可点。

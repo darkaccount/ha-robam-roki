@@ -123,9 +123,20 @@ def _ensure(name: str) -> types.ModuleType:
 
 
 def _flow_base() -> type:
-    """A ConfigFlow base that swallows the class keyword arguments."""
+    """A ConfigFlow/OptionsFlow base that swallows the class keyword arguments.
+
+    It also implements the two response shapes a menu flow needs: a form
+    description (with its description placeholders) and a menu.  hass and
+    config_entry are plain attributes so a test can hand the flow a double; the
+    real Home Assistant assigns both before the first step runs.
+    """
 
     class _ConfigFlowBase:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.hass = _Stub("hass")
+            self.config_entry = None
+            self.context: dict[str, object] = {}
+
         def __init_subclass__(cls, **kwargs: object) -> None:
             super().__init_subclass__()
 
@@ -135,6 +146,7 @@ def _flow_base() -> type:
             step_id: str,
             data_schema: object = None,
             errors: dict[str, str] | None = None,
+            description_placeholders: dict[str, str] | None = None,
             **kwargs: object,
         ) -> dict[str, Any]:
             return {
@@ -142,6 +154,23 @@ def _flow_base() -> type:
                 "step_id": step_id,
                 "data_schema": data_schema,
                 "errors": errors or {},
+                "description_placeholders": description_placeholders or {},
+            }
+
+        def async_show_menu(
+            self,
+            *,
+            step_id: str,
+            menu_options: object,
+            description_placeholders: object = None,
+            menu_option_descriptions: object = None,
+            **kwargs: object,
+        ) -> dict[str, Any]:
+            return {
+                "type": "menu",
+                "step_id": step_id,
+                "menu_options": list(menu_options),  # type: ignore[call-overload]
+                "description_placeholders": description_placeholders or {},
             }
 
         def async_create_entry(self, **kwargs: object) -> dict[str, Any]:
@@ -155,14 +184,6 @@ def _flow_base() -> type:
 
         def _abort_if_unique_id_configured(self) -> None:
             return None
-
-        @property
-        def hass(self) -> object:
-            return _Stub("hass")
-
-        @property
-        def context(self) -> dict[str, Any]:
-            return {}
 
     return _ConfigFlowBase
 
@@ -217,7 +238,7 @@ def install_ha_stubs() -> None:
     config_entries.ConfigEntry = _Stub("ConfigEntry")
     config_entries.ConfigFlow = _flow_base()
     config_entries.ConfigFlowResult = type("ConfigFlowResult", (), {})
-    config_entries.OptionsFlow = type("OptionsFlow", (), {})
+    config_entries.OptionsFlow = _flow_base()
     ha.config_entries = config_entries
 
     helpers = _ensure_package("homeassistant.helpers")
@@ -264,6 +285,21 @@ def install_ha_stubs() -> None:
 
     config_validation.multi_select = multi_select
     helpers.config_validation = config_validation
+
+    selector = _ensure_package("homeassistant.helpers.selector")
+
+    class DeviceSelectorConfig(dict):
+        """TypedDict stand-in: the real one is called with keyword arguments."""
+
+    class DeviceSelector:
+        """The only selector this integration uses so far."""
+
+        def __init__(self, config: Any = None) -> None:
+            self.config = config
+
+    selector.DeviceSelectorConfig = DeviceSelectorConfig
+    selector.DeviceSelector = DeviceSelector
+    helpers.selector = selector
 
     aiohttp_client = _ensure("homeassistant.helpers.aiohttp_client")
     aiohttp_client.async_get_clientsession = lambda hass: None

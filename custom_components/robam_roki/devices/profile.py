@@ -7,9 +7,14 @@ profiles.py) over an optional Python base driver:
 * a profile entry for an existing key overrides presentation fields (name,
   icon, unit, device_class, state_class, entity_category) and, when it has
   keys, the value extraction as well;
-* a profile entry for a new key becomes a fresh read-only entity;
-* commands() is empty in P1, so no control platform generates anything for a
-  profile-driven device -- fan/light/number/select all gate on capabilities.
+* a profile entry for a new key becomes a fresh read-only entity.
+
+commands() merges the base driver's commands under the profile's controls with
+the same shallow semantics: a same-named control replaces the base command
+whole, and a new key becomes a fresh command (the button platform renders the
+ones no dedicated platform consumes).  A control entry that cannot become a
+CommandSpec is skipped with a warning, so one broken line never disarms the
+rest of the device.
 
 Nothing here touches the appliance: entities are pure reads of coordinator data.
 """
@@ -162,9 +167,85 @@ class ProfileDriver(RokiDeviceDriver):
         self.category_code = profile.dc
         self.category_name = profile.name or "Profile"
 
+    # -- commands ---------------------------------------------------------
+
     def commands(self) -> dict[str, CommandSpec]:
-        """P1 exposes no controls: a YAML profile is read-only telemetry only."""
-        return {}
+        """Base driver commands with the profile's controls layered on top.
+
+        The merge is shallow, exactly like the sensor sections: a control with
+        an existing key replaces that command whole, a new key adds one.  The
+        base driver comes first so a profile that only tweaks telemetry keeps
+        every control the appliance already had.
+        """
+        merged: dict[str, CommandSpec] = (
+            dict(self.base.commands()) if self.base is not None else {}
+        )
+        for key, entry in self.profile.controls.items():
+            spec = self._command_from_entry(key, entry)
+            if spec is not None:
+                merged[key] = spec
+        return merged
+
+    def _command_from_entry(
+        self, key: str, entry: dict[str, Any]
+    ) -> CommandSpec | None:
+        """Lift one validated YAML control into a CommandSpec.
+
+        The profile layer has already checked kinds and field types; this
+        guard only covers the constraints CommandSpec itself enforces (an mqtt
+        frame needs its command number and a hex body, an invoke needs a
+        function), so a control built by hand in a Profile object cannot blow
+        up the device either.
+        """
+        where = f"profile {self.profile.id}: control {key}"
+        kind = entry.get("kind")
+        name = entry.get("name")
+        verified = bool(entry.get("verified", True))
+        try:
+            if kind == "mqtt":
+                return CommandSpec(
+                    kind="mqtt",
+                    name=name,
+                    command=entry.get("command"),
+                    body_hex=entry.get("body_hex"),
+                    verified=verified,
+                )
+            if kind == "property":
+                on = entry.get("on")
+                off = entry.get("off")
+                if not on or not off:
+                    _LOGGER.warning(
+                        "%s: kind=property needs on and off, control skipped",
+                        where,
+                    )
+                    return None
+                return CommandSpec(
+                    kind="property",
+                    name=name,
+                    on=on,
+                    off=off,
+                    verified=verified,
+                )
+            if kind == "invoke":
+                function = entry.get("function")
+                if function is None:
+                    _LOGGER.warning(
+                        "%s: kind=invoke needs function, control skipped", where
+                    )
+                    return None
+                return CommandSpec(
+                    kind="invoke",
+                    name=name,
+                    function=str(function),
+                    param=entry.get("param"),
+                    params=entry.get("params"),
+                    verified=verified,
+                )
+        except (TypeError, ValueError) as err:
+            _LOGGER.warning("%s: invalid control (%s), skipped", where, err)
+            return None
+        _LOGGER.warning("%s: unknown kind %r, control skipped", where, kind)
+        return None
 
     # -- sensors ----------------------------------------------------------
 

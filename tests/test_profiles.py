@@ -967,6 +967,42 @@ def test_mqtt_controls_missing_or_broken_fields_are_skipped(
     assert "command/body_hex only apply to kind=mqtt" in warnings
 
 
+def test_a_control_name_is_a_display_label(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    text = """
+    schema: roki-profile/1
+    match:
+      dc: RZQL
+    controls:
+      lamp:
+        kind: mqtt
+        command: 140
+        body_hex: "01"
+        name: 开灯
+      nameless:
+        kind: mqtt
+        command: 141
+        body_hex: "01"
+      broken_name:
+        kind: mqtt
+        command: 142
+        body_hex: "01"
+        name: [not, text]
+    """
+    with caplog.at_level(logging.WARNING):
+        profile = _load(tmp_path, text)
+    assert profile is not None
+    assert profile.controls["lamp"]["name"] == "开灯"
+    # Optional: without it the button platform falls back to the key.
+    assert "name" not in profile.controls["nameless"]
+    # A bad type is dropped with a warning, the control itself survives.
+    assert "name" not in profile.controls["broken_name"]
+    assert profile.controls["broken_name"]["command"] == 142
+    warnings = "\n".join(record.getMessage() for record in caplog.records)
+    assert ".name:" in warnings
+
+
 # -- the module itself ---------------------------------------------------
 
 

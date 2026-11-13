@@ -162,7 +162,7 @@
   "services": {
     "draft_profile": {
       "name": "Draft a profile",
-      "description": "Create a read-only profile draft and fixture from the cached device properties. No command is sent to the appliance and no cloud request is made.",
+      "description": "Create a profile draft and fixture from the cached device properties; a recent learning session adds ready-to-test controls. No command is sent to the appliance and no cloud request is made.",
       "fields": {
         "device_id": {
           "name": "Device",
@@ -192,7 +192,7 @@
         },
         "duration": {
           "name": "Duration (seconds)",
-          "description": "Default 600, at most 600."
+          "description": "Default 300, at most 600."
         }
       }
     },
@@ -203,6 +203,20 @@
         "device_id": {
           "name": "Device (optional)",
           "description": "Check that the session belongs to this device."
+        }
+      }
+    },
+    "export_profile": {
+      "name": "Export profile (.md)",
+      "description": "Combine the active user profile and its fixture into one Markdown file (five sections, two marker blocks) that can be pasted into a GitHub issue or a PR. Only the .md is written: no yaml/json, and no command is sent to the appliance.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Pick a ROBAM ROKI device from the device registry (or give guid instead)."
+        },
+        "guid": {
+          "name": "Device GUID",
+          "description": "Give the device GUID directly (alternative to device_id, rarely needed)."
         }
       }
     }
@@ -225,6 +239,14 @@
     "step": {
       "init": {
         "title": "ROKI options",
+        "menu_options": {
+          "general": "General settings",
+          "learn": "Learn a new device control",
+          "cleanup": "Clean up drafts"
+        }
+      },
+      "general": {
+        "title": "General settings",
         "data": {
           "levels": "Fan levels (comma separated)",
           "max_level": "Level count for unknown models (2-6)",
@@ -233,7 +255,34 @@
           "countdown_auto_off": "Turn the hood off when the countdown ends (the appliance itself only beeps)",
           "allow_unverified_controls": "Allow unverified controls (experimental)"
         }
+      },
+      "learn": {
+        "title": "Learn a new device control",
+        "description": "Current learning session: {status}\n\nPick the device and the duration, set the action to start, then operate the feature in the official App. Come back and choose stop when you are done, then call robam_roki.draft_profile to draft the profile. No command is sent to the appliance while learning.",
+        "data": {
+          "device_id": "Device",
+          "duration": "Learning duration (seconds)",
+          "action": "Action (start / stop)"
+        }
+      },
+      "cleanup": {
+        "title": "Clean up drafts",
+        "description": "Draft files found: {drafts}\n\nOnly draft-*.yaml files are deleted; profiles you wrote by hand are untouched.",
+        "data": {
+          "remove_drafts": "Delete these drafts"
+        }
       }
+    },
+    "error": {
+      "invalid_levels": "Enter positive levels separated by commas, for example 1,2,3,6",
+      "device_required": "Select the device to learn"
+    },
+    "abort": {
+      "learn_started": "Learning started: operate the feature in the official App, then come back here and choose stop.",
+      "learn_stopped": "Learning finished: call robam_roki.draft_profile to draft a profile with controls.",
+      "learn_failed": "The learning action failed: another session may be running; see the Home Assistant log.",
+      "drafts_removed": "Drafts deleted.",
+      "drafts_kept": "Drafts kept, nothing was changed."
     }
   }
 }

@@ -162,7 +162,7 @@
   "services": {
     "draft_profile": {
       "name": "生成 profile 草稿",
-      "description": "用已缓存的设备属性生成只读 profile 草稿与 fixture。不会向设备发送任何命令，也不会请求云端。",
+      "description": "用已缓存的设备属性生成 profile 草稿与 fixture；若刚结束学习模式，会自动带上可测试的 controls。不会向设备发送任何命令，也不会请求云端。",
       "fields": {
         "device_id": {
           "name": "设备",
@@ -192,7 +192,7 @@
         },
         "duration": {
           "name": "学习时长（秒）",
-          "description": "默认 600，上限 600。"
+          "description": "默认 300，上限 600。"
         }
       }
     },
@@ -203,6 +203,20 @@
         "device_id": {
           "name": "设备（可选）",
           "description": "校验会话是否属于该设备。"
+        }
+      }
+    },
+    "export_profile": {
+      "name": "导出 profile（.md）",
+      "description": "把当前生效的用户 profile 与 fixture 合成一份 Markdown（五个小节、两个标记块），方便贴到 GitHub issue 或 PR。只输出 .md，不会写 yaml/json，也不会向设备发送任何命令。",
+      "fields": {
+        "device_id": {
+          "name": "设备",
+          "description": "从设备注册表选择一个 ROBAM ROKI 设备（与 guid 二选一）。"
+        },
+        "guid": {
+          "name": "设备 GUID",
+          "description": "直接指定设备 GUID（与 device_id 二选一，一般不需要）。"
         }
       }
     }
@@ -225,6 +239,14 @@
     "step": {
       "init": {
         "title": "ROKI 选项",
+        "menu_options": {
+          "general": "常规设置",
+          "learn": "学习新设备控制",
+          "cleanup": "清理草稿"
+        }
+      },
+      "general": {
+        "title": "常规设置",
         "data": {
           "levels": "档位列表（逗号分隔）",
           "max_level": "未知型号的档位数量（2-6）",
@@ -233,7 +255,34 @@
           "countdown_auto_off": "倒计时结束后自动关机（设备本身只会蜂鸣提醒）",
           "allow_unverified_controls": "允许未验证的控制（实验性）"
         }
+      },
+      "learn": {
+        "title": "学习新设备控制",
+        "description": "当前学习会话：{status}\n\n先选设备与时长、动作选「开始」，然后用官方 App 操作要接入的功能；完成后回到这里选「结束」，再调用 robam_roki.draft_profile 生成草稿。学习期间不会向设备发送任何命令。",
+        "data": {
+          "device_id": "设备",
+          "duration": "学习时长（秒）",
+          "action": "动作（开始 / 结束）"
+        }
+      },
+      "cleanup": {
+        "title": "清理草稿",
+        "description": "发现以下草稿文件：{drafts}\n\n只会删除 draft-*.yaml；你手写的 profile 不受影响。",
+        "data": {
+          "remove_drafts": "删除这些草稿"
+        }
       }
+    },
+    "error": {
+      "invalid_levels": "请输入用逗号分隔的正整数档位，例如 1,2,3,6",
+      "device_required": "请选择要学习的设备"
+    },
+    "abort": {
+      "learn_started": "已开始学习：现在用官方 App 操作要接入的功能，完成后回到选项里选「结束」。",
+      "learn_stopped": "学习已结束：可调用 robam_roki.draft_profile 生成带 controls 的草稿。",
+      "learn_failed": "学习操作失败：可能已有其它学习会话在进行，详见 Home Assistant 日志。",
+      "drafts_removed": "草稿已删除。",
+      "drafts_kept": "已保留草稿，未做任何修改。"
     }
   }
 }

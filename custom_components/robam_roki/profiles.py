@@ -28,7 +28,12 @@ A profile file looks like this (schema roki-profile/1)::
         keys: [doorState, doorOpen]
         on_values: [1, "open"]
         name: 门
-    controls: {}                 # reserved for P2; never activated in P1
+    controls:                    # declarative commands (see PROFILES.md)
+      lamp:
+        kind: mqtt
+        command: 132
+        body_hex: "01"
+        verified: false
 
 Files under a _shared/ subdirectory are fragments: they may omit match and are
 merged into the profiles that extend them.  A broken file only ever affects
@@ -101,6 +106,7 @@ BINARY_SENSOR_FIELDS = frozenset(
 CONTROL_FIELDS = frozenset(
     {
         "kind",
+        "name",
         "on",
         "off",
         "function",
@@ -425,6 +431,9 @@ def _validate_control(key: str, entry: Any, path: Path) -> dict[str, Any] | None
             _warn("%s.function: string or integer expected, ignored", where)
 
     _apply_text(spec, data, "param", where, yaml_bools=True)
+    # A control's name is only a label for the button entity; like a sensor's
+    # name it wins over the key when present.
+    _apply_text(spec, data, "name", where)
 
     if kind == "mqtt":
         command = data.get("command")

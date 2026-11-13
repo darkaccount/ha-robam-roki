@@ -46,6 +46,7 @@ DEFAULT_ALLOW_UNVERIFIED_CONTROLS = False
 
 # Learning mode (P3-C): passively record the official App's commands for up
 # to ten minutes, split them into action groups and diff the property snapshots.
+LEARN_DEFAULT_SECONDS = 300
 LEARN_MAX_SECONDS = 600
 LEARN_GAP_SECONDS = 2.5
 LEARN_MAX_ACTIONS = 50
@@ -265,7 +266,15 @@ def resolve_levels(
     return list(range(1, max(2, int(max_level or DEFAULT_MAX_LEVEL)) + 1))
 
 
-PLATFORMS = ["fan", "light", "sensor", "binary_sensor", "number", "select"]
+PLATFORMS = [
+    "fan",
+    "light",
+    "sensor",
+    "binary_sensor",
+    "number",
+    "select",
+    "button",
+]
 
 # Cloud endpoints (see api.py).
 BASE_URL = "https://api.myroki.com"

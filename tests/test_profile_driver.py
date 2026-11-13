@@ -314,10 +314,116 @@ def test_matching_profile_builds_a_profile_driver() -> None:
     assert spec.unit_of_measurement == "%"
 
 
-def test_profile_driver_commands_are_empty_in_p1() -> None:
+def test_a_telemetry_only_profile_has_no_commands() -> None:
+    """A migrated category is read-only until a control is declared.
+
+    This is the promise the built-in YAML migrations (stove, dishwasher, water
+    purifier) rely on: describing telemetry must never arm a write path.
+    """
     driver = _driver_for(_device(), _full(sensors={"a": {"keys": ["a"]}}))
     assert driver.commands() == {}
     assert driver.capabilities == frozenset()
+
+
+# -- profile controls become commands ------------------------------------
+
+
+def _hood_device(guid: str = "H000000000000009") -> dict[str, Any]:
+    return {"guid": guid, "name": "hood", "dc": "RYYJ", "dt": "R8229", "deviceSource": 0}
+
+
+def test_extends_hood_plus_one_mqtt_control_merges_five_capabilities() -> None:
+    device = _hood_device()
+    profile = _full(
+        dc="RYYJ",
+        python_base="hood",
+        controls={
+            "lamp": {
+                "kind": "mqtt",
+                "command": 132,
+                "body_hex": "01",
+                "verified": False,
+            }
+        },
+    )
+    driver = _driver_for(device, profile)
+    commands = driver.commands()
+    assert list(commands) == ["power", "level", "light", "timing", "lamp"]
+    assert driver.capabilities == frozenset(
+        {"power", "level", "light", "timing", "lamp"}
+    )
+    lamp = commands["lamp"]
+    assert lamp.kind == "mqtt"
+    assert lamp.command == 132
+    assert lamp.body_hex == "01"
+    assert lamp.verified is False
+    # The base driver's own commands survive the merge unchanged.
+    assert commands["level"].kind == "invoke"
+    assert commands["level"].function == "134"
+    assert commands["power"].kind == "property"
+
+
+def test_a_profile_control_overrides_a_builtin_command() -> None:
+    device = _hood_device()
+    profile = _full(
+        dc="RYYJ",
+        python_base="hood",
+        controls={
+            "light": {
+                "kind": "mqtt",
+                "command": 140,
+                "body_hex": "",
+                "name": "灯",
+            }
+        },
+    )
+    commands = _driver_for(device, profile).commands()
+    # Same key: the profile replaces the base spec whole, like the sensor merge.
+    assert commands["light"].kind == "mqtt"
+    assert commands["light"].command == 140
+    assert commands["light"].name == "灯"
+    # The other base commands are untouched.
+    assert commands["power"].kind == "property"
+    assert commands["timing"].kind == "invoke"
+
+
+def test_a_profile_without_extends_exposes_exactly_its_controls() -> None:
+    profile = _full(
+        controls={
+            "beep": {"kind": "invoke", "function": "137"},
+            "lamp": {"kind": "mqtt", "command": 132, "body_hex": "02"},
+        }
+    )
+    driver = _driver_for(_device(), profile)
+    assert driver.base is None
+    assert list(driver.commands()) == ["beep", "lamp"]
+    assert driver.commands()["beep"].function == "137"
+    assert driver.capabilities == frozenset({"beep", "lamp"})
+
+
+def test_a_broken_control_is_skipped_without_losing_the_others(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A Profile object can be built by hand (a test double, a future loader),
+    # so the driver still validates CommandSpec's own constraints instead of
+    # trusting the profile layer blindly.
+    profile = _full(
+        controls={
+            "no_command": {"kind": "mqtt", "body_hex": "01"},
+            "no_off": {"kind": "property", "on": {"working_status": 1}},
+            "no_function": {"kind": "invoke", "param": "level"},
+            "bad_kind": {"kind": "write"},
+            "lamp": {"kind": "mqtt", "command": 132, "body_hex": "01"},
+        }
+    )
+    with caplog.at_level(logging.WARNING):
+        commands = _driver_for(_device(), profile).commands()
+    assert list(commands) == ["lamp"]
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "control no_command" in messages
+    assert "control no_off" in messages
+    assert "control no_function" in messages
+    assert "control bad_kind" in messages
 
 
 def test_profile_entries_become_binary_sensors() -> None:

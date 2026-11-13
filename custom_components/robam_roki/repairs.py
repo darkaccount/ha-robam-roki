@@ -189,6 +189,31 @@ def _desired_issues(
     return desired
 
 
+async def _async_desired_issues(
+    hass: Any,
+    profiles: list[Any],
+    devices: list[dict[str, Any]],
+    user_dir: Path | None,
+    allow_unverified: bool,
+) -> dict[str, dict[str, Any]]:
+    """Build the issue table off the event loop.
+
+    _desired_issues reads the user profile directory (a scandir plus one
+    read_text per YAML file), which must not run on the event loop: Home
+    Assistant logs every such call as a blocking-call warning.  A coordinator
+    double without an executor (the offline tests) calls it directly -- there
+    is no loop there to block.
+    """
+    add_executor_job = getattr(hass, "async_add_executor_job", None)
+    if not callable(add_executor_job):
+        return _desired_issues(
+            profiles, devices, user_dir, allow_unverified
+        )
+    return await add_executor_job(
+        _desired_issues, profiles, devices, user_dir, allow_unverified
+    )
+
+
 async def async_refresh_issues(
     hass: Any,
     coordinator: Any,
@@ -209,8 +234,8 @@ async def async_refresh_issues(
         )
     )
 
-    desired = _desired_issues(
-        profiles, devices, user_dir, allow_unverified
+    desired = await _async_desired_issues(
+        hass, profiles, devices, user_dir, allow_unverified
     )
     existing = _existing_issue_ids(hass)
     for issue_id in existing - set(desired):

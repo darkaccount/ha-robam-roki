@@ -1,6 +1,6 @@
 draft_profile:
   name: 生成 profile 草稿
-  description: 用已缓存的设备属性生成只读 profile 草稿与 fixture，不会向设备发送任何命令。
+  description: 用已缓存的设备属性生成 profile 草稿与 fixture，不会向设备发送任何命令；走过学习模式后会自动带上可测试的 controls。
   fields:
     device_id:
       name: 设备
@@ -21,3 +21,54 @@ draft_profile:
       default: true
       selector:
         boolean:
+
+learn_start:
+  name: 开始学习新设备控制
+  description: 被动记录官方 App 发往该设备的命令，最多 10 分钟。学习期间不会向设备发送任何命令。
+  fields:
+    device_id:
+      name: 设备
+      description: 要学习的设备（与 guid 二选一）。
+      selector:
+        device:
+          integration: robam_roki
+    guid:
+      name: 设备 GUID
+      description: 直接指定设备 GUID（与 device_id 二选一）。
+      selector:
+        text:
+    duration:
+      name: 学习时长（秒）
+      description: 默认 300，上限 600。
+      default: 300
+      selector:
+        number:
+          min: 1
+          max: 600
+          unit_of_measurement: s
+
+learn_stop:
+  name: 结束学习
+  description: 结束当前学习会话，返回记录到的动作列表与观察到的属性变化。
+  fields:
+    device_id:
+      name: 设备（可选）
+      description: 校验当前会话是否属于该设备。
+      selector:
+        device:
+          integration: robam_roki
+export_profile:
+  name: 导出 profile（.md）
+  description: 把当前生效的用户 profile 与 fixture 合成一份 Markdown（五个小节、两个标记块），方便贴到 GitHub issue 或 PR。只输出 .md，不会写 yaml/json，也不会向设备发送任何命令。
+  fields:
+    device_id:
+      name: 设备
+      description: 从设备注册表选择一个 ROBAM ROKI 设备（与 guid 二选一）。
+      selector:
+        device:
+          integration: robam_roki
+    guid:
+      name: 设备 GUID
+      description: 直接指定设备 GUID（与 device_id 二选一，一般不需要）。
+      selector:
+        text:

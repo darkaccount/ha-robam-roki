@@ -1,10 +1,11 @@
+
 """Draft a YAML profile and a fixture from captured device properties.
 
 The drafter never guesses protocol semantics: property values become sensors
 with an inferred scalar type, while anything semantic (device_class, unit,
 enum maps) is only emitted as a commented suggestion for the user to review.
-The controls block is always fully commented, because P2 only drafts read-only
-profiles.
+The controls block is only rendered when a learning session produced real
+commands; otherwise it stays a commented template.
 
 Like redact.py this module is pure Python.  It is importable both as part of
 the integration package and stand-alone from tools/roki_cli.py, which is why
@@ -68,6 +69,28 @@ CONTROL_TEMPLATE: tuple[str, ...] = (
     "#     verified: false",
 )
 
+def _strip_frame_prefix(body_hex: str) -> str:
+    """Drop the terminal byte and the ascii user id from a captured body.
+
+    The learning session records the whole marshalled body because that is
+    what the wire carries: 0x0b (terminal type) + the App account user id +
+    the payload.  The executor prepends its own terminal type and user id,
+    so keeping the captured ones would double them and the appliance would
+    ignore the frame.  Only the payload belongs in body_hex.
+    """
+    try:
+        raw = bytes.fromhex(str(body_hex))
+    except ValueError:
+        return str(body_hex).lower()
+    if not raw or raw[0] != TERMINAL_TYPE_APP:
+        return raw.hex()
+    rest = raw[1:]
+    cut = 0
+    while cut < len(rest) and 0x30 <= rest[cut] <= 0x39:
+        cut += 1
+    return rest[cut:].hex()
+
+
 def _normalise_learned(learned: Any) -> list[dict[str, Any]]:
     """Accept the grouped coordinator form or the flat learn_stop actions."""
     if not learned:
@@ -86,51 +109,127 @@ def _normalise_learned(learned: Any) -> list[dict[str, Any]]:
             frames = [item]
         observed = item.get("observed") or {}
         usable = [
-            frame for frame in frames if frame.get("command") is not None
+            {
+                **frame,
+                "body_hex": _strip_frame_prefix(
+                    str(frame.get("body_hex") or "")
+                ),
+            }
+            for frame in frames
+            if frame.get("command") is not None
         ]
         if usable:
             groups.append({"frames": usable, "observed": observed})
     return groups
 
 
+#: Command numbers the protocol already documents, used to name a learned
+#: control when no property change was observed around its frame.
+FALLBACK_NAME_BY_COMMAND: dict[int, str] = {
+    132: "开机/关机",
+    134: "设置档位",
+    136: "灯光开关",
+    144: "设置倒计时",
+}
+
+
+def _observed_to(observed: dict[str, Any], key: str) -> Any:
+    """The value a property changed to inside one learned group, or None."""
+    change = observed.get(key)
+    if not isinstance(change, dict):
+        return None
+    return change.get("to")
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def suggest_control_name(entry: dict[str, Any]) -> str:
+    """A first-guess display name for one learned control.
+
+    The only evidence available without probing the appliance is what the
+    property snapshots showed around the frame, so the name is derived from
+    that effect: workStatus/level/lightStatus changes describe the common hood
+    buttons.  Without an observable effect the documented meaning of the
+    command number is used, and finally a plain "动作 N".  The drafter writes
+    it as an editable suggestion, never as a fact.
+    """
+    observed = entry.get("observed")
+    if not isinstance(observed, dict):
+        observed = {}
+
+    work_status = _as_int(_observed_to(observed, "workStatus"))
+    level = _as_int(_observed_to(observed, "level"))
+    light = _as_int(_observed_to(observed, "lightStatus"))
+
+    if work_status == 1:
+        if level is not None and level > 0:
+            return f"开机（档位 {level}）"
+        return "开机"
+    if work_status == 0:
+        return "关机"
+    if level is not None and level > 0:
+        return f"设置档位 {level}"
+    if light == 1:
+        return "开灯"
+    if light == 0:
+        return "关灯"
+
+    command = _as_int(entry.get("command"))
+    if command is not None and command in FALLBACK_NAME_BY_COMMAND:
+        return FALLBACK_NAME_BY_COMMAND[command]
+    return f"动作 {int(entry.get('index') or 1)}"
+
+
 def controls_from_actions(learned: Any) -> list[dict[str, Any]]:
     """Turn learned groups into profile controls entries.
 
-    Inside one group, consecutive frames with the same command and body
-    collapse into one entry (the App occasionally retransmits); the group
-    keeps its raw frame count for the review comment.  The HA service and the
-    CLI both call this one generator, so their controls match byte for byte.
+    A frame is identified by (command, body): duplicates collapse inside one
+    group (the App retransmits and the capture interleaves read frames) and
+    across groups (the same button pressed twice must not become two entries).
+    The first occurrence wins, so the entry keeps the effect it produced.
+    Groups whose frames are all duplicates are not rendered at all.  The HA
+    service and the CLI both call this one generator, so their controls match
+    byte for byte.
     """
     entries: list[dict[str, Any]] = []
     index = 0
+    emitted: set[tuple[int, str]] = set()
     for group_index, group in enumerate(_normalise_learned(learned)):
         runs: list[list[Any]] = []
+        seen: dict[tuple[int, str], int] = {}
         for frame in group["frames"]:
             command = int(frame["command"])
             body_hex = str(frame.get("body_hex") or "").lower()
-            if (
-                runs
-                and runs[-1][0] == command
-                and runs[-1][1] == body_hex
-            ):
-                runs[-1][2] += 1
-            else:
-                runs.append([command, body_hex, 1])
-        for command, body_hex, _repeats in runs:
+            key = (command, body_hex)
+            if key in seen:
+                runs[seen[key]][2] += 1
+                continue
+            seen[key] = len(runs)
+            runs.append([command, body_hex, 1])
+        fresh = [run for run in runs if (run[0], run[1]) not in emitted]
+        if not fresh:
+            continue
+        for command, body_hex, _repeats in fresh:
+            emitted.add((command, body_hex))
             index += 1
             entries.append(
                 {
+                    "index": index,
                     "name": f"action_{index}",
                     "command": command,
                     "body_hex": body_hex,
                     "group_index": group_index,
                     "group_frame_count": len(group["frames"]),
-                    "group_entry_count": len(runs),
+                    "group_entry_count": len(fresh),
                     "observed": group.get("observed") or {},
                 }
             )
     return entries
-
 
 def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
     """Render the learned controls section with its review comments."""
@@ -159,6 +258,10 @@ def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
             f"  {_yaml_key(entry['name'])}:  # 命令 {entry['command']}，"
             f"body {body}{effect}"
         )
+        lines.append(
+            "    # 名称是按设备变化推测的，建议改成 App 上显示的名字"
+        )
+        lines.append(f"    name: {_yaml_string(suggest_control_name(entry))}")
         lines.append("    kind: mqtt")
         lines.append(f"    command: {int(entry['command'])}")
         lines.append(f"    body_hex: {_yaml_string(entry['body_hex'])}")
@@ -168,14 +271,18 @@ def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
 
 _HEADER: tuple[str, ...] = (
     "# ROKI profile draft (generated by the profile drafter).",
-    "# Read-only: the sensors below only read coordinator properties, and no",
-    "# command is ever sent.  Semantic hints are comments for you to review.",
+    "# Read-only: the sensors below only read coordinator properties.",
+    "# Controls are only rendered from a learning session and stay hidden",
+    "# until the experimental-controls option is enabled.",
 )
 
 #: Protocol bookkeeping keys that never describe the appliance state.
 PROTOCOL_METADATA_KEYS = frozenset(
     {"lastupdatetime", "responsemessagetype", "msgid", "timestamp"}
 )
+
+#: Mirrors mqtt.TERMINAL_TYPE_APP; local so this module stays HA-free.
+TERMINAL_TYPE_APP = 0x0B
 
 #: Word level synonyms between the REST (camelCase) and older spellings.
 _ALIAS_WORDS = (("working", "work"),)

@@ -41,6 +41,7 @@ from .const import (
     DEFAULT_COUNTDOWN_AUTO_OFF,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    LEARN_DEFAULT_SECONDS,
     LEARN_GAP_SECONDS,
     LEARN_MAX_ACTIONS,
     LEARN_MAX_BODY_BYTES,
@@ -188,6 +189,12 @@ class _DeviceTransport:
 # timer's gear can land last and drag the fan back for a few seconds.  A
 # single idempotent 134 re-assert fixes the flicker without touching 144.
 COUNTDOWN_LEVEL_REASSERT_SECONDS = 2.5
+
+
+#: Frames the official App sends just to read state (130 poll, 128 query).
+#: Real-device evidence: 60+ of the 68 recorded "actions" were these read-only
+#: frames, and their steady beat kept refreshing the group gap.
+IGNORED_LEARN_COMMANDS = frozenset({128, 130})
 
 
 def _device_from_topic(topic: str) -> str | None:
@@ -864,7 +871,7 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return self.__dict__.get("_learn") is not None
 
     def learn_start(
-        self, device_id: str, duration: int = LEARN_MAX_SECONDS
+        self, device_id: str, duration: int = LEARN_DEFAULT_SECONDS
     ) -> dict[str, Any]:
         """Start passively recording the frames the official App sends."""
         if self.learn_active():
@@ -891,9 +898,7 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         }
         self._learn = state
         self._state("_learned_groups").pop(device_id, None)
-        state["cancel"] = self.hass.async_call_later(
-            seconds, self._async_learn_timeout
-        )
+        state["cancel"] = self._schedule_learn_timeout(seconds)
         name = self.device_info_for(device_id).get("name") or device_id
         self._notify(
             f"已开始学习 {name}（最长 {seconds} 秒）。"
@@ -904,6 +909,22 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "device_id": device_id,
             "expires_at": state["deadline"].isoformat(),
         }
+
+    def _schedule_learn_timeout(self, seconds: int) -> Any | None:
+        """Schedule the auto-stop with the real Home Assistant helper.
+
+        HomeAssistant has no async_call_later method (the first real-device
+        run failed with "Unknown error" because of that); the helper lives in
+        homeassistant.helpers.event and is imported lazily so the offline test
+        harness can skip it.
+        """
+        try:
+            from homeassistant.helpers.event import async_call_later
+        except ImportError:  # offline test harness without the helper
+            return None
+        return async_call_later(
+            self.hass, seconds, self._async_learn_timeout
+        )
 
     async def _async_learn_timeout(self, now: Any = None) -> None:
         """The duration elapsed: stop the session through the shared path."""
@@ -981,6 +1002,11 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
         device_id = _device_from_topic(topic)
         if device_id is None or device_id != str(state["guid"]):
+            return
+        if payload[17] in IGNORED_LEARN_COMMANDS:
+            # Polls/queries are reads, not user actions; recording them would
+            # also refresh last_frame_at and collapse the whole session into
+            # one group.
             return
         try:
             source = payload[:17].decode("ascii")

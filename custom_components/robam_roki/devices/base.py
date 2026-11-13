@@ -18,6 +18,11 @@ from ..coordinator import RokiCoordinator
 # filters on a device's category code any more.
 Capability = Literal["power", "level", "light", "timing"]
 
+#: The capabilities a dedicated platform already renders as a rich entity
+#: (fan, light, number, select).  The button platform consumes whatever is left
+#: over, so a learned/declared command can never appear twice.
+STANDARD_CAPABILITIES = frozenset({"power", "level", "light", "timing"})
+
 #: The largest raw MQTT payload a declarative command may carry.
 MAX_MQTT_BODY_BYTES = 64
 
@@ -32,12 +37,15 @@ class CommandSpec:
     kind="property" writes the on/off payload through the cloud property API;
     kind="invoke" calls a vendor function identified by function and passes
     param/params; kind="mqtt" sends one raw frame (command + body_hex).
+    name is the display label a declarative source (a YAML profile) declared
+    for the command; the button platform uses it, falling back to the key.
     verified records whether the command has been confirmed on real hardware:
     a spec stays in commands() once declared, but an unverified one is hidden
     from the platforms unless the allow_unverified_controls option is on.
     """
 
     kind: Literal["property", "invoke", "mqtt"]
+    name: str | None = None
     on: dict[str, Any] | None = None
     off: dict[str, Any] | None = None
     function: str | None = None

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -141,6 +142,8 @@ sys.modules[PACKAGE] = package
 
 const = importlib.import_module(f"{PACKAGE}.const")
 devices = importlib.import_module(f"{PACKAGE}.devices")
+export = importlib.import_module(f"{PACKAGE}.export")
+profiles = importlib.import_module(f"{PACKAGE}.profiles")
 services = importlib.import_module(f"{PACKAGE}.services")
 draft = importlib.import_module(f"{PACKAGE}.draft")
 
@@ -316,6 +319,7 @@ def test_service_registers_only_once(tmp_path: Path) -> None:
     asyncio.run(services.async_setup_services(hass))
     assert set(hass.services.registered) == {
         (DOMAIN, "draft_profile"),
+        (DOMAIN, "export_profile"),
         (DOMAIN, "learn_start"),
         (DOMAIN, "learn_stop"),
     }
@@ -336,11 +340,11 @@ def test_learn_start_resolves_the_device_and_clamps_duration(
     assert coordinator.learn_calls == [("start", GUID, 600)]
 
 
-def test_learn_start_defaults_to_ten_minutes(tmp_path: Path) -> None:
+def test_learn_start_defaults_to_five_minutes(tmp_path: Path) -> None:
     coordinator = _FakeCoordinator()
     hass = _FakeHass(tmp_path, [coordinator])
     _call_service(hass, "learn_start", {"guid": GUID})
-    assert coordinator.learn_calls == [("start", GUID, 600)]
+    assert coordinator.learn_calls == [("start", GUID, 300)]
 
 
 def test_learn_start_rejects_a_bad_duration(tmp_path: Path) -> None:
@@ -486,7 +490,7 @@ def test_notification_puts_paths_before_the_full_text(tmp_path: Path) -> None:
     separator = message.index("以下为文件全文")
     yaml_text = _profile_path(tmp_path).read_text(encoding="utf-8")
     assert yaml_text.splitlines()[2] in message[separator:]
-    assert "controls 段为注释" in message
+    assert "只有只读传感器" in message
     # The next step tells the user how to activate the profile.
     assert "重新加载" in message
 
@@ -508,7 +512,11 @@ def test_service_inherits_the_builtin_driver(tmp_path: Path) -> None:
     assert document["extends"] == "python:hood"
     # workStatus is already exposed by HoodDriver, so no duplicate sensor.
     assert "workStatus" not in (document.get("sensors") or {})
-    assert "level" in document["sensors"]
+    # level / lightStatus / timing back the hood controls, so the draft
+    # must not duplicate them as sensors either.
+    for skipped in ("workStatus", "level", "lightStatus", "timing"):
+        assert skipped not in (document.get("sensors") or {})
+    assert "phone" in document["sensors"]  # a genuinely new property stays
     assert "已继承内置驱动 python:hood" in NOTIFICATIONS[0]["message"]
 
 
@@ -527,6 +535,7 @@ def test_draft_profile_writes_the_learned_controls(tmp_path: Path) -> None:
         _profile_path(tmp_path).read_text(encoding="utf-8")
     )
     assert document["controls"]["action_1"] == {
+        "name": "开机",
         "kind": "mqtt",
         "command": 132,
         "body_hex": "01",
@@ -589,6 +598,216 @@ def test_unwritable_config_directory_notifies_failure(tmp_path: Path) -> None:
     assert "原因" in NOTIFICATIONS[0]["message"]
 
 
+# -- stale drafts -------------------------------------------------------
+
+
+def test_an_old_draft_is_mentioned_in_the_notification(tmp_path: Path) -> None:
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    _call(hass, {"guid": GUID})
+    assert "检测到旧草稿" not in NOTIFICATIONS[0]["message"]
+
+    _call(hass, {"guid": GUID})
+    message = NOTIFICATIONS[1]["message"]
+    assert "检测到旧草稿 draft-RYYJ-R8229.yaml" in message
+    assert "新文件不会覆盖它" in message
+    assert "建议删除以免匹配冲突" in message
+    assert _profile_path(tmp_path, "-2").is_file()
+
+
+def test_only_drafts_for_the_same_device_are_reported(tmp_path: Path) -> None:
+    profiles = tmp_path / "robam_roki" / "profiles"
+    profiles.mkdir(parents=True)
+    (profiles / "draft-RYYJ-R9700.yaml").write_text("other", encoding="utf-8")
+    (profiles / "mine.yaml").write_text("mine", encoding="utf-8")
+
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    _call(hass, {"guid": GUID})
+    message = NOTIFICATIONS[0]["message"]
+    assert "检测到旧草稿" not in message
+    assert "draft-RYYJ-R9700.yaml" not in message
+    assert "mine.yaml" not in message
+
+
+def test_a_draft_suffix_number_counts_as_an_old_draft(tmp_path: Path) -> None:
+    profiles = tmp_path / "robam_roki" / "profiles"
+    profiles.mkdir(parents=True)
+    (profiles / "draft-RYYJ-R8229-7.yaml").write_text("old", encoding="utf-8")
+
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    _call(hass, {"guid": GUID})
+    message = NOTIFICATIONS[0]["message"]
+    assert "检测到旧草稿 draft-RYYJ-R8229-7.yaml" in message
+
+
+# -- export_profile -----------------------------------------------------
+
+
+def _user_profile(
+    tmp_path: Path,
+    *,
+    source: str | None = None,
+    controls: dict[str, Any] | None = None,
+) -> Any:
+    path = tmp_path / "robam_roki" / "profiles" / "mine-RYYJ.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "schema: roki-profile/1\nextends: python:hood\nmatch:\n"
+        "  dc: RYYJ\n  dt: R8229\n",
+        encoding="utf-8",
+    )
+    return profiles.FullProfile(
+        id="mine",
+        source=source or profiles.SOURCE_USER,
+        path=path,
+        dc="RYYJ",
+        dt="R8229",
+        name=None,
+        sensors={},
+        binary_sensors={},
+        controls=dict(controls or {}),
+        extends=None,
+        python_base="hood",
+    )
+
+
+def _export(
+    tmp_path: Path,
+    profile: Any,
+    coordinator: Any = None,
+) -> tuple[_FakeHass, Any, Path]:
+    coordinator = coordinator or _FakeCoordinator()
+    coordinator.profiles = [profile] if profile is not None else []
+    hass = _FakeHass(tmp_path, [coordinator])
+    _call_service(hass, "export_profile", {"guid": GUID})
+    exports = tmp_path / "robam_roki" / "exports"
+    files = sorted(exports.iterdir())
+    assert len(files) == 1, files
+    return hass, coordinator, files[0]
+
+
+def test_export_writes_exactly_one_markdown_file(tmp_path: Path) -> None:
+    _hass, _, path = _export(tmp_path, _user_profile(tmp_path))
+    assert path.suffix == ".md"
+    # The documented file name rule: <dc>-<dt>-<YYYYmmdd-HHMM>.md
+    assert re.fullmatch(r"RYYJ-R8229-\d{8}-\d{4}\.md", path.name)
+    assert path.parent.name == "exports"
+    assert path.parent.parent.name == "robam_roki"
+    # Only the Markdown is written: no .yaml and no .json next to it.
+    assert all(item.suffix == ".md" for item in path.parent.iterdir())
+    assert str(path) in NOTIFICATIONS[0]["message"]
+    assert "只输出这一份 .md" in NOTIFICATIONS[0]["message"]
+
+
+def test_the_markdown_has_the_five_sections_and_two_marker_blocks(
+    tmp_path: Path,
+) -> None:
+    _, _, path = _export(tmp_path, _user_profile(tmp_path))
+    markdown = path.read_text(encoding="utf-8")
+    for heading in ("## 1.", "## 2.", "## 3.", "## 4.", "## 5."):
+        assert heading in markdown, heading
+    assert "## 6." not in markdown
+    assert "<!-- roki:profile-yaml -->" in markdown
+    assert "<!-- roki:fixture-json -->" in markdown
+    assert "已脱敏：不含设备 GUID、手机号、token、App GUID" in markdown
+    assert "python:hood" in markdown
+
+
+def test_export_needs_a_draft_first(tmp_path: Path) -> None:
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])  # no profiles at all
+    with pytest.raises(ServiceValidationError) as err:
+        _call_service(hass, "export_profile", {"guid": GUID})
+    assert "draft_profile" in str(err.value)
+    assert not (tmp_path / "robam_roki" / "exports").exists()
+
+
+def test_a_builtin_profile_is_rejected(tmp_path: Path) -> None:
+    profile = _user_profile(tmp_path, source=profiles.SOURCE_BUILTIN)
+    coordinator = _FakeCoordinator()
+    coordinator.profiles = [profile]
+    hass = _FakeHass(tmp_path, [coordinator])
+    with pytest.raises(ServiceValidationError) as err:
+        _call_service(hass, "export_profile", {"guid": GUID})
+    assert "issue" in str(err.value)
+    assert "draft_profile" not in str(err.value)
+    assert not (tmp_path / "robam_roki" / "exports").exists()
+
+
+def test_export_reuses_an_existing_fixture(tmp_path: Path) -> None:
+    fixture = {
+        "schema": "roki-fixture/1",
+        "source": "auto",
+        "match": {"dc": "RYYJ", "dt": "R8229"},
+        "properties": {"workStatus": 1},
+        "expect": {"work_status": "开机"},
+    }
+    fixture_path = _fixture_path(tmp_path)
+    fixture_path.parent.mkdir(parents=True)
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    _, _, path = _export(tmp_path, _user_profile(tmp_path))
+    markdown = path.read_text(encoding="utf-8")
+    block = export.find_marked_block(
+        markdown, export.FIXTURE_MARKER_START, export.FIXTURE_MARKER_END
+    )
+    assert json.loads(block) == fixture
+    assert str(fixture_path) in markdown
+
+
+def test_export_generates_the_fixture_when_none_exists(tmp_path: Path) -> None:
+    _, _, path = _export(tmp_path, _user_profile(tmp_path))
+    markdown = path.read_text(encoding="utf-8")
+    block = export.find_marked_block(
+        markdown, export.FIXTURE_MARKER_START, export.FIXTURE_MARKER_END
+    )
+    document = json.loads(block)
+    assert document["schema"] == "roki-fixture/1"
+    assert document["match"] == {"dc": "RYYJ", "dt": "R8229"}
+    # The drafted fixture redacts the credentials it captured.
+    assert document["properties"]["phone"] == "**REDACTED**"
+    assert "tests/fixtures/devices/RYYJ-R8229.json" in markdown
+
+
+def test_the_checklist_names_the_learned_effect(tmp_path: Path) -> None:
+    controls = {
+        "action_1": {
+            "name": "开机",
+            "kind": "mqtt",
+            "command": 132,
+            "body_hex": "01",
+            "verified": False,
+        }
+    }
+    coordinator = _FakeCoordinator()
+    coordinator.learned = [
+        {
+            "frames": [{"command": 132, "body_hex": "01"}],
+            "observed": {"workStatus": {"from": 0, "to": 1}},
+        }
+    ]
+    _, _, path = _export(
+        tmp_path, _user_profile(tmp_path, controls=controls), coordinator
+    )
+    markdown = path.read_text(encoding="utf-8")
+    assert "| action_1 | 开机 | 132 | 01 | workStatus 0 → 1 | false |" in markdown
+
+
+def test_export_runs_its_file_io_in_the_executor(tmp_path: Path) -> None:
+    hass, _, _ = _export(tmp_path, _user_profile(tmp_path))
+    assert "_read_export_inputs" in hass.executor_calls
+    assert "_write_export" in hass.executor_calls
+
+
+def test_a_blocked_exports_directory_notifies_a_failure(tmp_path: Path) -> None:
+    (tmp_path / "robam_roki").mkdir()
+    (tmp_path / "robam_roki" / "exports").write_text("blocked", encoding="utf-8")
+    profile = _user_profile(tmp_path)
+    coordinator = _FakeCoordinator()
+    coordinator.profiles = [profile]
+    hass = _FakeHass(tmp_path, [coordinator])
+    _call_service(hass, "export_profile", {"guid": GUID})
+    assert len(NOTIFICATIONS) == 1
+    assert "失败" in NOTIFICATIONS[0]["title"]
+
 # -- the module itself ---------------------------------------------------
 
 
@@ -612,15 +831,24 @@ def test_packaging_is_in_sync() -> None:
         "write_fixture",
     ]
 
+    exported = strings["services"]["export_profile"]
+    assert sorted(exported) == ["description", "fields", "name"]
+    assert sorted(exported["fields"]) == ["device_id", "guid"]
+    assert sorted(english["services"]["export_profile"]["fields"]) == [
+        "device_id",
+        "guid",
+    ]
+
     manifest = json.loads(
         (COMPONENT / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.5.0"
 
     service_yaml = (COMPONENT / "services.yaml").read_text(encoding="utf-8")
     for field in ("device_id", "guid", "write_fixture"):
         assert field in service_yaml
     assert "draft_profile" in service_yaml
+    assert "export_profile" in service_yaml
 
 
 def _key_shape(value: Any) -> Any:

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 MODULE_DIR = (
@@ -65,6 +66,21 @@ def _controls_slice(text: str) -> str:
 # -- the generator -------------------------------------------------------
 
 
+def test_the_captured_terminal_and_user_id_are_stripped() -> None:
+    # The App marshals terminal type + its account user id before the
+    # payload; the executor adds its own, so the drafter must drop them.
+    groups = [
+        {
+            "frames": [{"command": 134, "body_hex": "0b3430333133303132313306"}],
+            "observed": {},
+        }
+    ]
+    document = _loaded(
+        draft.draft_from_properties(DEVICE, PROPERTIES, learned_controls=groups)
+    )
+    assert document["controls"]["action_1"]["body_hex"] == "06"
+
+
 def test_controls_are_generated_with_dedup_and_group_comments() -> None:
     result = draft.draft_from_properties(
         DEVICE, PROPERTIES, learned_controls=GROUPS
@@ -72,12 +88,14 @@ def test_controls_are_generated_with_dedup_and_group_comments() -> None:
     document = _loaded(result)
     assert document["controls"] == {
         "action_1": {
+            "name": "开机",
             "kind": "mqtt",
             "command": 132,
             "body_hex": "01",
             "verified": False,
         },
         "action_2": {
+            "name": "设置档位",
             "kind": "mqtt",
             "command": 134,
             "body_hex": "02",
@@ -89,17 +107,22 @@ def test_controls_are_generated_with_dedup_and_group_comments() -> None:
     assert "# 本组 1 帧，去重后 1 条" in text
     assert "命令 132，body 01；观察到 workStatus 0 → 1" in text
     assert "命令 134，body 02" in text
+    # The suggested name is annotated as a guess, never presented as fact.
+    assert text.count("# 名称是按设备变化推测的，建议改成 App 上显示的名字") == 2
     # The commented template is gone once real controls exist.
     assert "# controls:  # P2 reserved" not in text
 
 
-def test_non_consecutive_identical_frames_are_kept() -> None:
+def test_non_consecutive_identical_frames_are_merged() -> None:
+    # Real-device captures interleaved read frames with the App's command, so
+    # the same command+body can appear several times inside one group.
     groups = [
         {
             "frames": [
                 {"command": 132, "body_hex": "01"},
-                {"command": 132, "body_hex": "01"},
                 {"command": 134, "body_hex": "02"},
+                {"command": 132, "body_hex": "01"},
+                {"command": 136, "body_hex": "03"},
                 {"command": 132, "body_hex": "01"},
             ],
             "observed": {},
@@ -110,15 +133,38 @@ def test_non_consecutive_identical_frames_are_kept() -> None:
             DEVICE, PROPERTIES, learned_controls=groups
         )
     )
-    assert list(document["controls"]) == [
-        "action_1",
-        "action_2",
-        "action_3",
-    ]
+    assert list(document["controls"]) == ["action_1", "action_2", "action_3"]
+    assert document["controls"]["action_1"]["command"] == 132
+    assert document["controls"]["action_2"]["command"] == 134
+    assert document["controls"]["action_3"]["command"] == 136
     text = draft.draft_from_properties(
         DEVICE, PROPERTIES, learned_controls=groups
     ).profile_yaml
-    assert "# 本组 4 帧，去重后 3 条" in text
+    assert "# 本组 5 帧，去重后 3 条" in text
+
+
+def test_the_same_command_in_two_groups_becomes_one_control() -> None:
+    # Real capture: the user pressed the same App button twice, so the same
+    # (command, body) landed in two different action groups.
+    groups = [
+        {
+            "frames": [{"command": 132, "body_hex": "00"}],
+            "observed": {"workStatus": {"from": 1, "to": 0}},
+        },
+        {
+            "frames": [{"command": 132, "body_hex": "00"}],
+            "observed": {},
+        },
+    ]
+    result = draft.draft_from_properties(
+        DEVICE, PROPERTIES, learned_controls=groups
+    )
+    document = _loaded(result)
+    assert list(document["controls"]) == ["action_1"]
+    assert document["controls"]["action_1"]["command"] == 132
+    # The first occurrence wins, so its effect is the one documented.
+    assert "观察到 workStatus 1 → 0" in result.profile_yaml
+
 
 
 def test_a_flat_learn_stop_action_list_is_accepted() -> None:
@@ -160,6 +206,75 @@ def test_learned_controls_combine_with_a_builtin_extends() -> None:
     assert document["extends"] == "python:hood"
     assert "workStatus" not in document["sensors"]
     assert document["controls"]["action_1"]["kind"] == "mqtt"
+
+
+# -- the suggested display names ----------------------------------------
+
+
+def test_a_power_frame_names_the_control_from_the_gear_it_reported() -> None:
+    groups = [
+        {
+            "frames": [{"command": 132, "body_hex": "02"}],
+            "observed": {
+                "workStatus": {"from": 0, "to": 1},
+                "level": {"from": 0, "to": 2},
+            },
+        }
+    ]
+    document = _loaded(
+        draft.draft_from_properties(DEVICE, PROPERTIES, learned_controls=groups)
+    )
+    assert document["controls"]["action_1"]["name"] == "开机（档位 2）"
+
+
+@pytest.mark.parametrize(
+    ("observed", "command", "expected"),
+    [
+        ({"workStatus": {"from": 0, "to": 1}}, 132, "开机"),
+        ({"workStatus": {"from": 1, "to": 0}}, 132, "关机"),
+        ({"level": {"from": 1, "to": 3}}, 134, "设置档位 3"),
+        ({"lightStatus": {"from": 0, "to": 1}}, 136, "开灯"),
+        ({"lightStatus": {"from": 1, "to": 0}}, 136, "关灯"),
+        # No observed effect: fall back to the documented command meaning.
+        ({}, 132, "开机/关机"),
+        ({}, 134, "设置档位"),
+        ({}, 136, "灯光开关"),
+        ({}, 144, "设置倒计时"),
+        # An undocumented command keeps a neutral, numbered label.
+        ({}, 170, "动作 1"),
+        # A change that carries no meaning for the hood also falls back.
+        ({"faultCode": {"from": 0, "to": 1}}, 170, "动作 1"),
+        # workStatus wins over a gear change: the gear is the power-on gear.
+        ({"level": {"from": 0, "to": 6}, "workStatus": {"from": 0, "to": 1}}, 132, "开机（档位 6）"),
+    ],
+)
+def test_control_names_follow_the_observed_effect(
+    observed: dict[str, Any], command: int, expected: str
+) -> None:
+    assert (
+        draft.suggest_control_name(
+            {"index": 1, "command": command, "observed": observed}
+        )
+        == expected
+    )
+
+
+def test_a_nameless_suggestion_is_still_written_into_the_yaml() -> None:
+    # A quoted name keeps the YAML valid even when the label carries spaces or
+    # full-width brackets, and profiles.py accepts it as a display label.
+    groups = [
+        {
+            "frames": [{"command": 132, "body_hex": "02"}],
+            "observed": {
+                "workStatus": {"from": 0, "to": 1},
+                "level": {"from": 0, "to": 2},
+            },
+        }
+    ]
+    text = draft.draft_from_properties(
+        DEVICE, PROPERTIES, learned_controls=groups
+    ).profile_yaml
+    assert '    name: "开机（档位 2）"' in text
 
 
 # -- the CLI shares the generator ---------------------------------------
