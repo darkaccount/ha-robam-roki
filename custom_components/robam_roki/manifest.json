@@ -1,12 +1,12 @@
 {
   "domain": "robam_roki",
   "name": "ROBAM ROKI",
-  "codeowners": [
-    "@darkaccount"
-  ],
   "categories": [
     "appliances_cleaning",
     "water.water_treatment"
+  ],
+  "codeowners": [
+    "@darkaccount"
   ],
   "config_flow": true,
   "documentation": "https://github.com/darkaccount/ha-robam-roki",
