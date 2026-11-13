@@ -375,7 +375,7 @@ def follow_up(promotion: Promotion) -> list[str]:
     return [
         "",
         "下一步：",
-        "  1) bash init.sh",
+        "  1) python -m pytest tests/ -q --no-header",
         "  2) python tools/check_fixtures.py --base HEAD~1 --head HEAD",
         "  3) 隐私复核：fixture 里没有真实手机号 / App GUID / token",
         "  4) README 的「支持范围」表加一行（品类列按实际填写）：",

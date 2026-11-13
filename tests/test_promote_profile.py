@@ -236,7 +236,7 @@ def test_the_follow_up_lists_the_gates(tmp_path: Path, repo: Path) -> None:
     promotion = promote.plan(_write_export(tmp_path), repo)
     lines = promote.follow_up(promotion)
     text = "\n".join(lines)
-    assert "bash init.sh" in text
+    assert "python -m pytest tests/" in text
     assert "check_fixtures.py --base HEAD~1 --head HEAD" in text
     assert "隐私复核" in text
     assert "| RYYJ | R8229 | 1 个 controls" in text
@@ -351,7 +351,7 @@ def test_the_cli_writes_into_the_given_repo_root(
     assert (repo / "custom_components" / "robam_roki" / "profiles" / "ryyj-r8229.yaml").is_file()
     output = capsys.readouterr().out
     assert "写入：" in output
-    assert "bash init.sh" in output
+    assert "python -m pytest tests/" in output
 
 
 def test_the_cli_reports_an_error_with_exit_code_2(
