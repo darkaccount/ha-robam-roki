@@ -15,6 +15,9 @@ meant for verifying an account and a device before relying on the integration:
 The password is read from ``--password``, ``ROKI_PASSWORD`` or an interactive
 prompt (recommended).  Credentials are never written to disk.
 
+``collect`` is read-only: the only frame it publishes is the status poll
+(command 130), and it never sends a power/level/light/timing/setprop command.
+
 Requires ``aiohttp`` and ``cryptography``.
 """
 
@@ -30,6 +33,7 @@ import os
 import platform
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +54,20 @@ MQTT_PATH = (
     / "mqtt.py"
 )
 
+REDACT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "custom_components"
+    / "robam_roki"
+    / "redact.py"
+)
+
+DRAFT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "custom_components"
+    / "robam_roki"
+    / "draft.py"
+)
+
 
 def load_api():
     spec = importlib.util.spec_from_file_location("roki_api", API_PATH)
@@ -67,6 +85,26 @@ def load_mqtt():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_standalone(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover
+        raise RuntimeError(f"Cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    # Register before executing: dataclasses resolves string annotations through
+    # sys.modules on Python 3.13.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_redact():
+    return _load_standalone("roki_redact", REDACT_PATH)
+
+
+def load_draft():
+    return _load_standalone("roki_draft", DRAFT_PATH)
 
 
 try:
@@ -707,6 +745,330 @@ async def cmd_watch(client, args):
         pass
 
 
+# -- profile collection --------------------------------------------------
+
+
+class _Collector:
+    """Accumulate decoded frames into one compressed, redacted bundle.
+
+    A hood repeats the same status frame on every poll, so only frames whose
+    properties actually changed are kept; the raw body is stored compactly as
+    [offset_ms, command, body_hex] (the 17-byte source address is dropped so a
+    bundle can be shared without leaking the account/app identifier).
+    """
+
+    def __init__(
+        self,
+        guid: str,
+        *,
+        max_frames: int = 5000,
+        max_bytes: int = 5 * 1024 * 1024,
+        auto_observations: bool = True,
+    ) -> None:
+        self.guid = guid
+        self.max_frames = max(1, int(max_frames))
+        self.max_bytes = max(1, int(max_bytes))
+        self.auto_observations = auto_observations
+        self.started = time.monotonic()
+        self.properties: dict[str, Any] = {}
+        self.frames: list[list[Any]] = []
+        self.observations: list[dict[str, Any]] = []
+        self.truncated = False
+        self._bytes = 0
+        # Baseline for the first labelled mark: the state when capture started.
+        self._mark_snapshot: dict[str, Any] | None = None
+
+    def offset_ms(self) -> int:
+        return int((time.monotonic() - self.started) * 1000)
+
+    @staticmethod
+    def _diff(
+        before: dict[str, Any], after: dict[str, Any]
+    ) -> dict[str, dict[str, Any]]:
+        changes: dict[str, dict[str, Any]] = {}
+        for key, value in after.items():
+            if before.get(key) != value:
+                changes[key] = {"from": before.get(key), "to": value}
+        for key, value in before.items():
+            if key not in after:
+                changes[key] = {"from": value, "to": None}
+        return changes
+
+    def handle_payload(self, payload: bytes) -> None:
+        decoded = mqtt.decode_fan_message(payload)
+        if decoded is None:
+            return
+        guid, command, props = decoded
+        if str(guid) != self.guid or "rc" in props:
+            return
+        changes = self._diff(self.properties, props)
+        if not changes:
+            # Structural compression: the same snapshot is only stored once.
+            return
+        if self.truncated:
+            return
+        body = payload[18:] if len(payload) > 18 else b""
+        if (
+            len(self.frames) >= self.max_frames
+            or self._bytes + len(body) > self.max_bytes
+        ):
+            self.truncated = True
+            return
+        offset = self.offset_ms()
+        self.frames.append([offset, command, body.hex()])
+        self._bytes += len(body)
+        self.properties.update(props)
+        if self._mark_snapshot is None:
+            self._mark_snapshot = dict(self.properties)
+        if self.auto_observations:
+            self.observations.append(
+                {"t": offset, "label": "auto", "changes": changes}
+            )
+
+    def set_properties(self, props: dict[str, Any]) -> None:
+        self.properties = dict(props)
+        if self._mark_snapshot is None:
+            self._mark_snapshot = dict(self.properties)
+
+    def mark(self, label: str) -> None:
+        """Record one labelled observation holding only the changed keys."""
+        before = self._mark_snapshot or {}
+        changes = self._diff(before, self.properties)
+        self.observations.append(
+            {"t": self.offset_ms(), "label": label, "changes": changes}
+        )
+        self._mark_snapshot = dict(self.properties)
+
+    def bundle(self, device: dict[str, Any], transport: str) -> dict[str, Any]:
+        redact = load_redact()
+        observations = [
+            {
+                "t": entry["t"],
+                "label": entry["label"],
+                "changes": redact.redact_properties(entry["changes"]),
+            }
+            for entry in self.observations
+        ]
+        data: dict[str, Any] = {
+            "schema": "roki-bundle/1",
+            "created": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "device": {
+                "dc": device.get("dc"),
+                "dt": device.get("dt"),
+                "transport": transport,
+            },
+            "properties": redact.redact_properties(self.properties),
+            "frames": self.frames,
+            "observations": observations,
+            "truncated": self.truncated,
+        }
+        if transport == "rest":
+            data["frames_unavailable"] = "rest"
+        return data
+
+
+async def _collect_session(client, handler, device_guid: str):
+    """Open the read-only MQTT subscription used by collect."""
+    app_guid = await client.async_get_app_guid()
+    if not app_guid:
+        raise SystemExit("The cloud did not return an app guid")
+    if not client.user_id:
+        await client.async_get_user()
+    await client.async_bind_app_guid()
+    session = mqtt.RokiMqttClient(app_guid, on_message=handler)
+    topics = {
+        mqtt.topic_for(device_guid),
+        mqtt.topic_for(device_guid, broadcast=True),
+        mqtt.topic_for(app_guid),
+    }
+    session.add_topics(topics)
+    await session.async_start()
+    await session.async_wait_connected(20)
+    return session
+
+
+async def _poll_once(session, device_guid: str) -> None:
+    """Publish exactly one read-only status poll (command 130)."""
+    payload = mqtt.encode_fan_command(session.app_guid, mqtt.CMD_FAN_POLL)
+    await session.async_publish(mqtt.topic_for(device_guid), payload)
+
+
+async def _collect_for(collector, session, device_guid: str, duration: float) -> None:
+    deadline = time.monotonic() + max(0.0, float(duration))
+    while not collector.truncated:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(2.0, remaining))
+        if collector.truncated:
+            break
+        await _poll_once(session, device_guid)
+
+
+async def _collect_with_marks(collector, session, device_guid: str) -> None:
+    while not collector.truncated:
+        label = await asyncio.to_thread(
+            input, "mark label (empty to finish): "
+        )
+        if not label.strip():
+            break
+        await _poll_once(session, device_guid)
+        await asyncio.sleep(0.2)
+        collector.mark(label.strip())
+    print()
+
+
+def _write_bundle(path: str, bundle: dict[str, Any]) -> Path:
+    target = Path(path)
+    if target.parent and str(target.parent) not in ("", "."):
+        target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(bundle, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+async def cmd_collect(client, args):
+    """Capture a read-only evidence bundle for profile drafting.
+
+    The only frame ever published is the read-only status poll (130); no
+    control command is sent.  REST devices cannot stream frames, so only their
+    property snapshot is kept and the bundle says so.
+    """
+    device = await _find_device(client, args.device)
+    if device is None:
+        raise SystemExit(f"Device {args.device} is not on this account")
+    guid = str(device.get("guid"))
+    transport = _transport(device, "auto")
+    collector = _Collector(
+        guid,
+        max_frames=args.max_frames,
+        max_bytes=args.max_bytes,
+        auto_observations=not args.mark,
+    )
+    print(f"device   : {device.get('name')}  ({guid})")
+    print(f"transport: {transport}")
+    if transport == "rest":
+        collector.set_properties(await client.async_get_properties(guid))
+    else:
+        def handler(topic: str, payload: bytes) -> None:
+            collector.handle_payload(payload)
+
+        session = await _collect_session(client, handler, guid)
+        try:
+            await _poll_once(session, guid)
+            if args.mark:
+                await _collect_with_marks(collector, session, guid)
+            else:
+                await _collect_for(collector, session, guid, args.duration)
+        finally:
+            await session.async_stop()
+    bundle = collector.bundle(device, transport)
+    target = _write_bundle(args.out, bundle)
+    print(f"bundle written: {target}")
+    print(f"  frames      : {len(bundle['frames'])}")
+    print(f"  observations: {len(bundle['observations'])}")
+    print(f"  truncated   : {str(bundle['truncated']).lower()}")
+    if transport == "rest":
+        print("  frames unavailable over REST; snapshot only")
+    if args.json:
+        dump(
+            {
+                "out": str(target),
+                "schema": bundle["schema"],
+                "frames": len(bundle["frames"]),
+                "observations": len(bundle["observations"]),
+                "truncated": bundle["truncated"],
+                "frames_unavailable": bundle.get("frames_unavailable"),
+            }
+        )
+
+
+def _count_redactions(original: Any, redacted: Any) -> int:
+    """How many values the drafter's redaction replaced (privacy report)."""
+    redact = load_redact()
+    if original is None:
+        return 0
+    count = 0
+    if isinstance(original, dict) and isinstance(redacted, dict):
+        for key, value in original.items():
+            after = redacted.get(key)
+            if after == redact.REDACTED and value != redact.REDACTED:
+                count += 1
+            else:
+                count += _count_redactions(value, after)
+    elif isinstance(original, list) and isinstance(redacted, list):
+        for before, after in zip(original, redacted):
+            count += _count_redactions(before, after)
+    return count
+
+
+def cmd_draft(client, args) -> int:
+    """Draft a profile + fixture from a bundle or HA diagnostics JSON."""
+    source = Path(args.input)
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except OSError as err:
+        print(f"cannot read {source}: {err}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as err:
+        print(f"{source} is not valid JSON: {err}", file=sys.stderr)
+        return 2
+
+    drafter = load_draft()
+    if isinstance(payload, dict) and payload.get("schema") == drafter.BUNDLE_SCHEMA:
+        result = drafter.draft_from_bundle(payload)
+    elif isinstance(payload, dict) and (
+        "entry" in payload or "coordinator" in payload
+    ):
+        result = drafter.draft_from_diagnostics(payload, dc=args.dc, dt=args.dt)
+    else:
+        print(
+            "unrecognised input: expected a roki-bundle/1 capture or a "
+            "Home Assistant diagnostics JSON",
+            file=sys.stderr,
+        )
+        return 2
+
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if not result.profile_yaml:
+        print("draft failed: nothing was generated", file=sys.stderr)
+        return 1
+
+    match = result.fixture.get("match") or {}
+    dc = str(match.get("dc") or "unknown")
+    dt = str(match.get("dt") or "unknown")
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = out_dir / f"{dc}-{dt}.yaml"
+    fixture_path = out_dir / f"{dc}-{dt}.json"
+    profile_path.write_text(result.profile_yaml, encoding="utf-8")
+    fixture_path.write_text(
+        json.dumps(result.fixture, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    redacted = _count_redactions(
+        payload.get("properties") if isinstance(payload, dict) else None,
+        result.fixture.get("properties"),
+    )
+    print(f"profile : {profile_path}")
+    print(f"fixture : {fixture_path}")
+    print(f"privacy : {redacted} sensitive value(s) redacted")
+    if args.json:
+        dump(
+            {
+                "profile": str(profile_path),
+                "fixture": str(fixture_path),
+                "redacted_values": redacted,
+                "warnings": result.warnings,
+            }
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Probe and control ROBAM / ROKI devices",
@@ -809,6 +1171,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_setprop.add_argument("--key", required=True)
     p_setprop.add_argument("--value", required=True)
 
+    p_collect = sub.add_parser(
+        "collect",
+        parents=[common],
+        help="capture a read-only bundle (status polls only, no commands)",
+        description=(
+            "Capture a read-only evidence bundle for the draft command.  The "
+            "only frame ever published is the read-only status poll "
+            "(command 130); no control command is ever sent."
+        ),
+        epilog=(
+            "Bundle notes: properties and observation values are redacted "
+            "before they are written; frame entries are "
+            "[offset_ms, command, body_hex] and the hex does not contain the "
+            "sender guid."
+        ),
+    )
+    p_collect.add_argument("--device", required=True, help="device guid")
+    p_collect.add_argument("--out", default="bundle.json", help="output file")
+    p_collect.add_argument(
+        "--duration",
+        type=float,
+        default=120.0,
+        help="collect for this many seconds (ignored with --mark)",
+    )
+    p_collect.add_argument(
+        "--mark",
+        action="store_true",
+        help=(
+            "interactive: type a label and press Enter for each observation; "
+            "an empty line ends the capture"
+        ),
+    )
+    p_collect.add_argument(
+        "--max-frames", type=int, default=5000, help="frame budget"
+    )
+    p_collect.add_argument(
+        "--max-bytes", type=int, default=5 * 1024 * 1024, help="body byte budget"
+    )
+
+    p_draft = sub.add_parser(
+        "draft",
+        help="draft a profile + fixture from a bundle or diagnostics JSON",
+    )
+    p_draft.add_argument("input", help="bundle JSON or HA diagnostics JSON")
+    p_draft.add_argument("--out", default=".", help="output directory")
+    p_draft.add_argument("--dc", help="pick the device by category code")
+    p_draft.add_argument("--dt", help="pick the device by model code")
+    p_draft.add_argument("--json", action="store_true", help="machine readable output")
+
     return parser
 
 
@@ -827,11 +1238,16 @@ COMMANDS = {
     "light": cmd_light,
     "invoke": cmd_invoke,
     "setprop": cmd_setprop,
+    "collect": cmd_collect,
+    "draft": cmd_draft,
 }
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "draft":
+        # Drafting is offline: it must work without phone/password or network.
+        raise SystemExit(cmd_draft(None, args))
     try:
         asyncio.run(with_client(args, COMMANDS[args.command]))
     except KeyboardInterrupt:

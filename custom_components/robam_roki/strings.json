@@ -159,6 +159,26 @@
       }
     }
   },
+  "services": {
+    "draft_profile": {
+      "name": "生成 profile 草稿",
+      "description": "用已缓存的设备属性生成只读 profile 草稿与 fixture。不会向设备发送任何命令，也不会请求云端。",
+      "fields": {
+        "device_id": {
+          "name": "设备",
+          "description": "从设备注册表选择一个 ROBAM ROKI 设备（与 guid 二选一）。"
+        },
+        "guid": {
+          "name": "设备 GUID",
+          "description": "直接指定设备 GUID（与 device_id 二选一，一般不需要）。"
+        },
+        "write_fixture": {
+          "name": "同时写入 fixture",
+          "description": "为回归测试保存同一份 fixture（默认开启）。"
+        }
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

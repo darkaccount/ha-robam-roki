@@ -155,7 +155,6 @@ def _power_w(props: dict[str, Any]) -> int:
 class ThermalCookerDriver(RokiDeviceDriver):
     """Driver managing Ovens, Steam Ovens, Microwaves and Sterilizers."""
 
-    is_controllable = False  # Telemetry / monitoring until verified
 
     def sensors(self) -> list[SensorSpec]:
         return [

@@ -159,6 +159,26 @@
       }
     }
   },
+  "services": {
+    "draft_profile": {
+      "name": "Draft a profile",
+      "description": "Create a read-only profile draft and fixture from the cached device properties. No command is sent to the appliance and no cloud request is made.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Pick a ROBAM ROKI device from the device registry (mutually exclusive with guid)."
+        },
+        "guid": {
+          "name": "Device GUID",
+          "description": "Target a device by GUID (mutually exclusive with device_id; rarely needed)."
+        },
+        "write_fixture": {
+          "name": "Write a fixture",
+          "description": "Also save a regression fixture for the draft (default on)."
+        }
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

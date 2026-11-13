@@ -14,7 +14,6 @@ class GenericDriver(RokiDeviceDriver):
 
     category_code = "GENERIC"
     category_name = "Generic Appliance"
-    is_controllable = False
 
     def sensors(self) -> list[SensorSpec]:
         """Provide a diagnostic sensor exposing raw properties in attributes."""

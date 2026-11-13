@@ -16,7 +16,6 @@ class WaterPurifierDriver(RokiDeviceDriver):
 
     category_code = "RJSQ"
     category_name = "Water Purifier"
-    is_controllable = False  # Telemetry only
 
     def sensors(self) -> list[SensorSpec]:
         return [

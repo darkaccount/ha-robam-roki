@@ -23,7 +23,6 @@ class StoveDriver(RokiDeviceDriver):
 
     category_code = "RRQZ"
     category_name = "Stove"
-    is_controllable = False  # Read-only for safety until verified
 
     def sensors(self) -> list[SensorSpec]:
         return [

@@ -1,0 +1,23 @@
+draft_profile:
+  name: 生成 profile 草稿
+  description: 用已缓存的设备属性生成只读 profile 草稿与 fixture，不会向设备发送任何命令。
+  fields:
+    device_id:
+      name: 设备
+      description: 从设备注册表选择一个 ROBAM ROKI 设备（与 guid 二选一）。
+      example: 4d1d2c0a8c8b4b93b1a0b6c8d9e0f102
+      selector:
+        device:
+          integration: robam_roki
+    guid:
+      name: 设备 GUID
+      description: 直接指定设备 GUID（与 device_id 二选一，一般不需要）。
+      example: R8229000000000000
+      selector:
+        text:
+    write_fixture:
+      name: 同时写入 fixture
+      description: 为回归测试保存同一份 fixture（默认开启）。
+      default: true
+      selector:
+        boolean:

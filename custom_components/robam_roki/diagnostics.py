@@ -4,46 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 
-from .const import (
-    CONF_ACCESS_TOKEN,
-    CONF_APP_GUID,
-    CONF_DEVICE_TOKEN,
-    CONF_PASSWORD,
-    CONF_PHONE,
-    CONF_REFRESH_TOKEN,
-    CONF_USER_ID,
-)
 from .coordinator import RokiCoordinator, mask_phone
+from .redact import REDACTED, SENSITIVE_KEYS, mask_guid, redact_secrets
 
-TO_REDACT = {
-    CONF_PHONE,
-    CONF_PASSWORD,
-    CONF_ACCESS_TOKEN,
-    CONF_REFRESH_TOKEN,
-    CONF_DEVICE_TOKEN,
-    CONF_APP_GUID,
-    CONF_USER_ID,
-    "phone",
-    "password",
-    "accessToken",
-    "refreshToken",
-    "deviceToken",
-    "appGuid",
-    "userId",
-    "token",
-}
+# Kept as a public name for compatibility.  The policy itself lives in
+# redact.py so the diagnostics export, the CLI bundle and the fixtures all use
+# exactly one set of rules.
+TO_REDACT = SENSITIVE_KEYS
 
 
 def _mask_guid(guid: str | None) -> str | None:
     """Mask a hardware GUID keeping only model prefix and trailing chars."""
-    if not guid or len(guid) < 8:
-        return "**REDACTED**"
-    return f"{guid[:4]}...{guid[-4:]}"
+    return mask_guid(guid)
 
 
 def _sanitize_device_data(raw_device: dict[str, Any]) -> dict[str, Any]:
@@ -53,8 +29,8 @@ def _sanitize_device_data(raw_device: dict[str, Any]) -> dict[str, Any]:
         cleaned["guid_masked"] = _mask_guid(str(cleaned["guid"]))
         del cleaned["guid"]
     if "mac" in cleaned:
-        cleaned["mac"] = "**REDACTED**"
-    return async_redact_data(cleaned, TO_REDACT)
+        cleaned["mac"] = REDACTED
+    return redact_secrets(cleaned)
 
 
 async def async_get_config_entry_diagnostics(
@@ -63,20 +39,23 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     coordinator: RokiCoordinator = entry.runtime_data.coordinator
 
-    # Sanitize devices in entry data
-    entry_data = async_redact_data(dict(entry.data), TO_REDACT)
+    # Sanitize devices first (guid -> guid_masked, mac -> REDACTED), then let
+    # the shared redaction policy remove the remaining credential values.  The
+    # order keeps the published fields identical to the previous implementation.
+    entry_data = dict(entry.data)
     if "devices" in entry_data:
         entry_data["devices"] = [
             _sanitize_device_data(d) if isinstance(d, dict) else d
             for d in entry_data["devices"]
         ]
+    entry_data = redact_secrets(entry_data)
 
     # Redact live coordinator cache
     sanitized_coordinator_data: dict[str, Any] = {}
     if coordinator.data:
         for guid, state in coordinator.data.items():
             masked_key = _mask_guid(guid) or "unknown"
-            sanitized_coordinator_data[masked_key] = async_redact_data(state, TO_REDACT)
+            sanitized_coordinator_data[masked_key] = redact_secrets(state)
 
     # Sanitize known registered devices
     sanitized_devices = [

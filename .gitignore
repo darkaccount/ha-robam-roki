@@ -9,3 +9,6 @@ secrets.yaml
 
 # Local reference material, never distributed
 *.apk
+
+# pytest basetemp fallback (sandbox cannot write %TEMP%)
+pytest-of-*/

@@ -26,7 +26,6 @@ class DishwasherDriver(RokiDeviceDriver):
 
     category_code = "RXWJ"
     category_name = "Dishwasher"
-    is_controllable = False  # Read-only until verified
 
     def sensors(self) -> list[SensorSpec]:
         return [

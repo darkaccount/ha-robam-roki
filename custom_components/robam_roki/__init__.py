@@ -60,6 +60,18 @@ class RokiRuntimeData:
 RokiConfigEntry = ConfigEntry
 
 
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register the integration-wide services.
+
+    Imported lazily so merely importing the package (as the offline tests do)
+    does not require the Home Assistant service/notification modules.
+    """
+    from .services import async_setup_services
+
+    await async_setup_services(hass)
+    return True
+
+
 def _load_profiles(hass: HomeAssistant) -> list[FullProfile]:
     """Load the built-in and user profiles and resolve their extends chains.
 
