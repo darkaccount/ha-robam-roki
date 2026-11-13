@@ -232,8 +232,10 @@ def test_protocol_metadata_is_skipped_with_a_comment() -> None:
     assert any(
         "skipped protocol metadata" in warning for warning in result.warnings
     )
-    # The fixture keeps the full captured payload for regression checks.
-    assert set(result.fixture["properties"]) == set(properties)
+    # The fixture keeps the captured state but not the protocol bookkeeping:
+    # a fixture is shared as evidence, so it must not carry capture timestamps
+    # or message ids.
+    assert set(result.fixture["properties"]) == {"level"}
 
 
 def test_builtin_driver_adds_extends_and_hides_covered_keys() -> None:

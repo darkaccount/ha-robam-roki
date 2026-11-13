@@ -38,7 +38,7 @@ REAL_DEVICE_FIXTURES = {"RYYJ-R8229", "RZKY-98AD3"}
 #: Synthetic fixtures for categories that have no capture yet.
 HAND_FIXTURES = {"RRQZ", "RXWJ", "RJSQ", "RZQL"}
 
-#: Every source a fixture may declare (see docs/workflows/merge-device-support).
+#: Every source a fixture may declare (see CONTRIBUTING.md, maintainer chapter).
 FIXTURE_SOURCES = {"user", "bundle", "auto", "hand"}
 
 

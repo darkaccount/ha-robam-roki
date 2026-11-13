@@ -208,6 +208,9 @@ def install_ha_stubs() -> None:
     exceptions.ConfigEntryNotReady = type(
         "ConfigEntryNotReady", (Exception,), {}
     )
+    exceptions.ServiceValidationError = type(
+        "ServiceValidationError", (Exception,), {}
+    )
     ha.exceptions = exceptions
 
     diagnostics = _ensure_package("homeassistant.components.diagnostics")

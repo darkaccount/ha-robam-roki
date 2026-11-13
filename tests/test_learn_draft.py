@@ -71,7 +71,7 @@ def test_the_captured_terminal_and_user_id_are_stripped() -> None:
     # payload; the executor adds its own, so the drafter must drop them.
     groups = [
         {
-            "frames": [{"command": 134, "body_hex": "0b3430333133303132313306"}],
+            "frames": [{"command": 134, "body_hex": "0b3132333435363738393006"}],
             "observed": {},
         }
     ]
@@ -95,7 +95,7 @@ def test_controls_are_generated_with_dedup_and_group_comments() -> None:
             "verified": False,
         },
         "action_2": {
-            "name": "设置档位",
+            "name": "设置档位 2",
             "kind": "mqtt",
             "command": 134,
             "body_hex": "02",
@@ -258,6 +258,30 @@ def test_control_names_follow_the_observed_effect(
         == expected
     )
 
+
+@pytest.mark.parametrize(
+    ("command", "body_hex", "expected"),
+    [
+        (134, "06", "设置档位 6"),
+        (134, "03", "设置档位 3"),
+        (132, "00", "关机"),
+        (132, "01", "开机"),
+        (136, "01", "开灯"),
+        (136, "00", "关灯"),
+        (140, "01", "动作 1"),
+    ],
+)
+def test_the_payload_byte_names_controls_without_observations(
+    command: int, body_hex: str, expected: str
+) -> None:
+    # The value byte is protocol evidence, so a command whose effect was not
+    # observed in time still gets a meaningful default name.
+    assert (
+        draft.suggest_control_name(
+            {"index": 1, "command": command, "body_hex": body_hex, "observed": {}}
+        )
+        == expected
+    )
 
 def test_a_nameless_suggestion_is_still_written_into_the_yaml() -> None:
     # A quoted name keeps the YAML valid even when the label carries spaces or

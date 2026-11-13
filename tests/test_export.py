@@ -168,6 +168,30 @@ def test_a_pipe_in_a_cell_cannot_break_the_table() -> None:
 # -- the verification checklist -----------------------------------------
 
 
+def test_observed_changes_are_recovered_from_the_draft_comments() -> None:
+    # A reload clears the in-memory learning groups; the checklist still has
+    # to show the evidence, which survives as comments inside the profile.
+    profile_yaml = (
+        "schema: roki-profile/1\n"
+        "controls:\n"
+        "  action_1:  # 命令 134，body 03；观察到 level 0 → 3, workStatus 0 → 1\n"
+        "    name: 开机（档位 3）\n"
+        "    kind: mqtt\n"
+        "    command: 134\n"
+        "    body_hex: \"03\"\n"
+        "  action_2:  # 命令 132，body 00\n"
+        "    name: 关机\n"
+        "    kind: mqtt\n"
+        "    command: 132\n"
+        "    body_hex: \"00\"\n"
+    )
+    index = export.observed_from_profile_comments(profile_yaml)
+    assert index["action_1"] == {
+        "level": {"from": 0, "to": 3},
+        "workStatus": {"from": 0, "to": 1},
+    }
+    assert "action_2" not in index
+
 def test_the_checklist_row_has_all_six_columns() -> None:
     markdown = _markdown()
     assert (

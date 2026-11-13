@@ -384,12 +384,32 @@ class _FakeDeviceRegistry:
         return self.entries.get(device_id)
 
 
+class _FakeConfigEntries:
+    """Records options updates and reloads made by the flow."""
+
+    def __init__(self) -> None:
+        self.updates: list[dict[str, Any]] = []
+        self.reloaded: list[str] = []
+
+    def async_update_entry(
+        self, entry: Any, *, options: Any = None, data: Any = None
+    ) -> None:
+        self.updates.append({"entry": entry, "options": options, "data": data})
+        if options is not None:
+            entry.options = dict(options)
+
+    async def async_reload(self, entry_id: str) -> bool:
+        self.reloaded.append(entry_id)
+        return True
+
+
 class _FakeHass:
     """hass with a config dir and an executor that records blocking work."""
 
     def __init__(self, base: Path) -> None:
         self.config = _FakeConfig(base)
         self.device_registry = _FakeDeviceRegistry()
+        self.config_entries = _FakeConfigEntries()
         self.executor_calls: list[str] = []
 
     async def async_add_executor_job(self, target: Any, *args: Any) -> Any:
@@ -398,17 +418,37 @@ class _FakeHass:
 
 
 class _FakeCoordinator:
-    def __init__(self, name: str = DEVICE["name"]) -> None:
+    def __init__(
+        self,
+        name: str = DEVICE["name"],
+        *,
+        dc: str = "RYYJ",
+        dt: str = "R8229",
+    ) -> None:
         self.name = name
+        self.dc = dc
+        self.dt = dt
         self.learn_calls: list[tuple[Any, ...]] = []
         self.learning = False
         self.failure: Exception | None = None
+        self.learned: dict[str, list[dict[str, Any]]] = {}
+        self.data: dict[str, dict[str, Any]] = {}
+        #: Actions the fake learning session reports on stop.
+        self.last_actions: list[dict[str, Any]] = []
 
     def learn_active(self) -> bool:
         return self.learning
 
+    def learned_controls(self, device_id: str) -> list[dict[str, Any]]:
+        return list(self.learned.get(device_id) or [])
+
     def device_info_for(self, guid: str) -> dict[str, Any]:
-        return {"guid": guid, "name": self.name}
+        return {
+            "guid": guid,
+            "name": self.name,
+            "dc": self.dc,
+            "dt": self.dt,
+        }
 
     def learn_start(self, device_id: str, duration: int) -> dict[str, Any]:
         if self.failure is not None:
@@ -422,15 +462,82 @@ class _FakeCoordinator:
             raise self.failure
         self.learn_calls.append(("stop", device_id))
         self.learning = False
-        return {"device_id": device_id, "actions": []}
+        return {"device_id": device_id, "actions": list(self.last_actions)}
 
 
 class _FakeEntry:
     def __init__(
         self, options: dict[str, Any] | None = None, coordinator: Any = None
     ) -> None:
+        self.entry_id = "entry-1"
         self.options = dict(options or {})
         self.runtime_data = types.SimpleNamespace(coordinator=coordinator)
+
+
+draft_module = _load_module("roki_cf_draft_test", "draft.py")
+
+
+class _FakeServices:
+    """Stand-in for services.py: the real drafter, a fake file writer."""
+
+    def __init__(self, base: Path) -> None:
+        self.base = base
+        self.export_calls: list[dict[str, Any]] = []
+        self.written: list[Path] = []
+        self.profile: Any = None
+        self.builtin = False
+        self.export_error: Exception | None = None
+        # The draft generator itself is the real one from draft.py.
+        self.draft_from_properties = draft_module.draft_from_properties
+        self.controls_from_actions = draft_module.controls_from_actions
+
+    def _build_driver(self, coordinator: Any, device: dict[str, Any]) -> Any:
+        return None
+
+    def _builtin_driver(self, driver: Any) -> tuple[None, None]:
+        return None, None
+
+    def _expect_values(
+        self, driver: Any, properties: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {}
+
+    def _write_draft(
+        self,
+        config_dir: str,
+        dc: str,
+        dt: str,
+        profile_yaml: str,
+        fixture: dict[str, Any],
+        write_fixture: bool,
+    ) -> tuple[str, None, list[str]]:
+        directory = Path(config_dir) / "robam_roki" / "profiles"
+        directory.mkdir(parents=True, exist_ok=True)
+        old = [
+            path.name
+            for path in sorted(directory.glob(f"draft-{dc}-{dt}*.yaml"))
+        ]
+        index = 1
+        while True:
+            suffix = "" if index == 1 else f"-{index}"
+            path = directory / f"draft-{dc}-{dt}{suffix}.yaml"
+            if not path.exists():
+                break
+            index += 1
+        path.write_text(profile_yaml, encoding="utf-8")
+        self.written.append(path)
+        return str(path), None, old
+
+    def _active_profile(self, coordinator: Any, device: dict[str, Any]) -> Any:
+        return self.profile
+
+    def _is_builtin_profile(self, profile: Any) -> bool:
+        return self.builtin
+
+    async def _async_export_profile(self, hass: Any, call: Any) -> None:
+        if self.export_error is not None:
+            raise self.export_error
+        self.export_calls.append(dict(call.data))
 
 
 def _options_flow(
@@ -468,7 +575,13 @@ def test_the_options_flow_opens_on_a_menu(tmp_path: Path) -> None:
     result = _run(flow.async_step_init())
     assert result["type"] == "menu"
     assert result["step_id"] == "init"
-    assert result["menu_options"] == ["general", "learn", "cleanup"]
+    assert result["menu_options"] == [
+        "general",
+        "learn",
+        "draft",
+        "export",
+        "cleanup",
+    ]
 
 
 def test_every_menu_entry_has_a_step(tmp_path: Path) -> None:
@@ -487,26 +600,56 @@ def test_the_menu_options_are_translated_in_all_three_files() -> None:
     )
     assert strings == chinese
     options = strings["options"]
-    assert set(options["step"]) == {"init", "general", "learn", "cleanup"}
-    assert set(options["step"]["init"]["menu_options"]) == {
+    assert set(options["step"]) == {
+        "init",
         "general",
         "learn",
+        "draft",
+        "draft_confirm",
+        "draft_confirm_enabled",
+        "export",
         "cleanup",
     }
+    labels = options["step"]["init"]["menu_options"]
+    assert list(labels) == ["general", "learn", "draft", "export", "cleanup"]
+    # The four self-service entries carry a fixed number in their label.
+    assert labels["learn"].startswith("1.")
+    assert labels["draft"].startswith("2.")
+    assert labels["export"].startswith("3.")
+    assert labels["cleanup"].startswith("4.")
     assert set(options["abort"]) >= {
         "learn_started",
         "learn_stopped",
         "learn_failed",
+        "draft_failed",
+        "draft_enabled",
+        "draft_reloaded",
+        "draft_written",
+        "export_done",
+        "export_no_profile",
+        "export_builtin",
+        "export_failed",
         "drafts_removed",
         "drafts_kept",
     }
+    assert "{count}" in options["abort"]["learn_stopped"]
     assert "device_required" in options["error"]
     # The English file must describe exactly the same steps and fields.
     assert set(options["step"]) == set(english["options"]["step"])
-    for step in ("learn", "cleanup"):
+    assert list(english["options"]["step"]["init"]["menu_options"]) == [
+        "general",
+        "learn",
+        "draft",
+        "export",
+        "cleanup",
+    ]
+    for step in ("learn", "draft", "export", "cleanup"):
         assert set(options["step"][step]["data"]) == set(
             english["options"]["step"][step]["data"]
         )
+    assert set(options["step"]["draft_confirm"]["data"]) == set(
+        english["options"]["step"]["draft_confirm"]["data"]
+    )
 
 
 # -- general settings ---------------------------------------------------
@@ -597,11 +740,17 @@ def test_the_duration_is_clamped_to_the_protocol_window(tmp_path: Path) -> None:
 def test_stopping_a_session_passes_the_device(tmp_path: Path) -> None:
     flow, _, coordinator = _options_flow(tmp_path)
     coordinator.learning = True
+    coordinator.last_actions = [
+        {"index": 1, "command": 132, "body_hex": "01"},
+        {"index": 2, "command": 134, "body_hex": "02"},
+    ]
     result = _run(
         flow.async_step_learn({"device_id": HA_DEVICE_ID, "action": "stop"})
     )
     assert result["reason"] == "learn_stopped"
     assert coordinator.learn_calls == [("stop", DEVICE["guid"])]
+    # Stopping only reports the count: it never writes a draft itself.
+    assert result["description_placeholders"] == {"count": "2"}
 
 
 def test_stopping_without_a_device_ends_whatever_is_running(
@@ -657,6 +806,266 @@ def test_remaining_seconds_are_exact_for_a_fixed_clock() -> None:
     assert config_flow._learn_remaining_seconds(later, now) == 0
 
 
+# -- step 2: generate a draft -------------------------------------------
+
+LEARNED_GROUP = {
+    "frames": [{"command": 132, "body_hex": "01"}],
+    "observed": {"workStatus": {"from": 0, "to": 1}},
+}
+
+
+def _draft_flow(
+    base: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    learned: bool = True,
+    options: dict[str, Any] | None = None,
+) -> tuple[Any, Any, Any, Any]:
+    fake = _FakeServices(base)
+    monkeypatch.setattr(config_flow, "_services", lambda: fake)
+    coordinator = _FakeCoordinator()
+    if learned:
+        coordinator.learned[DEVICE["guid"]] = [dict(LEARNED_GROUP)]
+    flow, hass, _ = _options_flow(base, options=options, coordinator=coordinator)
+    return flow, hass, coordinator, fake
+
+
+def test_the_draft_step_offers_the_device_picker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _, _ = _draft_flow(tmp_path, monkeypatch, learned=False)
+    result = _run(flow.async_step_draft())
+    assert result["type"] == "form"
+    assert result["step_id"] == "draft"
+    schema = result["data_schema"]
+    selector = schema.schema[_field(schema, "device_id")]
+    assert type(selector).__name__ == "DeviceSelector"
+    assert "没有可用的学习结果" in result["description_placeholders"]["learned"]
+
+
+def test_the_draft_step_mentions_pending_learning_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, coordinator, _ = _draft_flow(tmp_path, monkeypatch)
+    coordinator._learned_groups = {DEVICE["guid"]: [dict(LEARNED_GROUP)]}
+    result = _run(flow.async_step_draft())
+    assert "已有学习结果" in result["description_placeholders"]["learned"]
+
+
+def test_a_draft_with_learned_controls_lands_in_the_confirm_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, hass, _, _ = _draft_flow(tmp_path, monkeypatch)
+    result = _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    assert result["type"] == "form"
+    assert result["step_id"] == "draft_confirm"  # switch still off
+    placeholders = result["description_placeholders"]
+    assert placeholders["file"] == "draft-RYYJ-R8229.yaml"
+    assert "1 条 controls" in placeholders["controls"]
+    assert placeholders["note"] == ""
+    written = tmp_path / "robam_roki" / "profiles" / "draft-RYYJ-R8229.yaml"
+    assert written.is_file()
+    assert "controls:" in written.read_text(encoding="utf-8")
+    # The blocking write went through the executor.
+    assert "_write_draft" in hass.executor_calls
+
+
+def test_a_draft_without_learned_controls_says_it_is_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _, _ = _draft_flow(tmp_path, monkeypatch, learned=False)
+    result = _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    assert "只有只读传感器" in result["description_placeholders"]["controls"]
+
+
+def test_an_existing_draft_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profiles = tmp_path / "robam_roki" / "profiles"
+    profiles.mkdir(parents=True)
+    existing = profiles / "draft-RYYJ-R8229.yaml"
+    existing.write_text("old: draft\n", encoding="utf-8")
+    flow, _, _, _ = _draft_flow(tmp_path, monkeypatch)
+    result = _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    placeholders = result["description_placeholders"]
+    assert placeholders["file"] == "draft-RYYJ-R8229-2.yaml"
+    assert "另存为" in placeholders["note"]
+    assert existing.read_text(encoding="utf-8") == "old: draft\n"
+    assert (profiles / "draft-RYYJ-R8229-2.yaml").is_file()
+
+
+def test_confirming_with_the_switch_off_can_enable_and_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, hass, _, _ = _draft_flow(tmp_path, monkeypatch)
+    _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    form = _run(flow.async_step_draft_confirm())
+    assert _field_names(form["data_schema"]) == [
+        "enable_unverified_controls",
+        "reload_now",
+    ]
+    result = _run(
+        flow.async_step_draft_confirm(
+            {"enable_unverified_controls": True, "reload_now": True}
+        )
+    )
+    assert result["type"] == "abort"
+    assert result["reason"] == "draft_enabled"
+    assert result["description_placeholders"]["file"] == "draft-RYYJ-R8229.yaml"
+    assert hass.config_entries.updates[0]["options"][
+        "allow_unverified_controls"
+    ] is True
+    assert hass.config_entries.reloaded == ["entry-1"]
+    assert flow.config_entry.options["allow_unverified_controls"] is True
+
+
+def test_enabling_with_an_update_listener_does_not_reload_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The real entry has an update listener that reloads on options changes;
+    # the flow must not queue a second reload of its own.
+    flow, hass, _, _ = _draft_flow(tmp_path, monkeypatch)
+    flow.config_entry.update_listeners = [object()]
+    _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    _run(flow.async_step_draft_confirm())
+    result = _run(
+        flow.async_step_draft_confirm(
+            {"enable_unverified_controls": True, "reload_now": True}
+        )
+    )
+    assert result["reason"] == "draft_enabled"
+    assert hass.config_entries.updates[0]["options"][
+        "allow_unverified_controls"
+    ] is True
+    assert hass.config_entries.reloaded == []
+
+
+def test_confirming_without_enabling_only_reloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, hass, _, _ = _draft_flow(tmp_path, monkeypatch)
+    _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    result = _run(
+        flow.async_step_draft_confirm(
+            {"enable_unverified_controls": False, "reload_now": True}
+        )
+    )
+    assert result["reason"] == "draft_reloaded"
+    assert hass.config_entries.updates == []
+    assert hass.config_entries.reloaded == ["entry-1"]
+
+
+def test_confirming_without_reloading_leaves_the_manual_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, hass, _, _ = _draft_flow(tmp_path, monkeypatch)
+    _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    result = _run(
+        flow.async_step_draft_confirm(
+            {"enable_unverified_controls": False, "reload_now": False}
+        )
+    )
+    assert result["reason"] == "draft_written"
+    assert hass.config_entries.reloaded == []
+
+
+def test_when_the_switch_is_already_on_only_the_reload_is_offered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _, _ = _draft_flow(
+        tmp_path,
+        monkeypatch,
+        options={"allow_unverified_controls": True},
+    )
+    _run(flow.async_step_draft({"device_id": HA_DEVICE_ID}))
+    form = _run(flow.async_step_draft_confirm())
+    assert form["step_id"] == "draft_confirm_enabled"
+    assert _field_names(form["data_schema"]) == ["reload_now"]
+    result = _run(flow.async_step_draft_confirm({"reload_now": True}))
+    assert result["reason"] == "draft_reloaded"
+
+
+# -- step 3: export a contribution package -------------------------------
+
+
+def _export_flow(
+    base: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    profile: bool = True,
+    builtin: bool = False,
+    error: Exception | None = None,
+) -> tuple[Any, Any, Any]:
+    fake = _FakeServices(base)
+    fake.profile = (
+        types.SimpleNamespace(path=str(base / "user-profile.yaml"))
+        if profile
+        else None
+    )
+    fake.builtin = builtin
+    fake.export_error = error
+    monkeypatch.setattr(config_flow, "_services", lambda: fake)
+    flow, hass, _ = _options_flow(base)
+    return flow, hass, fake
+
+
+def test_the_export_step_offers_the_device_picker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _ = _export_flow(tmp_path, monkeypatch)
+    result = _run(flow.async_step_export())
+    assert result["type"] == "form"
+    assert result["step_id"] == "export"
+    schema = result["data_schema"]
+    selector = schema.schema[_field(schema, "device_id")]
+    assert type(selector).__name__ == "DeviceSelector"
+
+
+def test_exporting_calls_the_service_and_points_at_the_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, fake = _export_flow(tmp_path, monkeypatch)
+    result = _run(flow.async_step_export({"device_id": HA_DEVICE_ID}))
+    assert result["type"] == "abort"
+    assert result["reason"] == "export_done"
+    assert fake.export_calls == [{"guid": DEVICE["guid"]}]
+
+
+def test_exporting_without_a_user_profile_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _ = _export_flow(tmp_path, monkeypatch, profile=False)
+    result = _run(flow.async_step_export({"device_id": HA_DEVICE_ID}))
+    assert result["reason"] == "export_no_profile"
+
+
+def test_exporting_a_builtin_profile_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, fake = _export_flow(tmp_path, monkeypatch, builtin=True)
+    result = _run(flow.async_step_export({"device_id": HA_DEVICE_ID}))
+    assert result["reason"] == "export_builtin"
+    assert fake.export_calls == []
+
+
+def test_an_export_failure_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = config_flow.ServiceValidationError("boom")
+    flow, _, _ = _export_flow(tmp_path, monkeypatch, error=error)
+    result = _run(flow.async_step_export({"device_id": HA_DEVICE_ID}))
+    assert result["reason"] == "export_failed"
+
+
+def test_the_export_step_requires_a_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, _, _ = _export_flow(tmp_path, monkeypatch)
+    result = _run(flow.async_step_export({"device_id": ""}))
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "device_required"}
+
+
 # -- draft cleanup ------------------------------------------------------
 
 
@@ -679,7 +1088,10 @@ def test_the_cleanup_step_lists_only_draft_profiles(tmp_path: Path) -> None:
     assert "draft-RYYJ-R8229-2.yaml" in drafts
     assert "mine.yaml" not in drafts
     # The directory scan runs in the executor, never on the event loop.
-    assert hass.executor_calls == ["_list_drafts"]
+    assert hass.executor_calls == ["_list_artefacts"]
+    # Fixtures and export bundles are listed separately so they can be ticked.
+    assert result["description_placeholders"]["fixtures"] == "（无）"
+    assert result["description_placeholders"]["exports"] == "（无）"
 
 
 def test_removing_drafts_keeps_hand_written_profiles(tmp_path: Path) -> None:
@@ -692,8 +1104,36 @@ def test_removing_drafts_keeps_hand_written_profiles(tmp_path: Path) -> None:
     assert result["reason"] == "drafts_removed"
     assert not (directory / "draft-RYYJ-R8229.yaml").exists()
     assert (directory / "mine.yaml").exists()
-    assert hass.executor_calls == ["_list_drafts", "_remove_drafts"]
+    # The submit path never lists: the remover does its own listing inside
+    # the executor, so one hop is enough.
+    assert hass.executor_calls == ["_remove_selected"]
 
+
+def test_fixtures_and_exports_can_be_removed_separately(tmp_path: Path) -> None:
+    drafts = _drafts_dir(tmp_path)
+    fixtures = drafts.parent / "fixtures"
+    exports = drafts.parent / "exports"
+    for directory in (fixtures, exports):
+        directory.mkdir(parents=True)
+    (drafts / "draft-RYYJ-R8229.yaml").write_text("a", encoding="utf-8")
+    (fixtures / "RYYJ-R8229.json").write_text("{}", encoding="utf-8")
+    (exports / "RYYJ-R8229-20260101-1200.md").write_text("#", encoding="utf-8")
+    flow, hass, _ = _options_flow(tmp_path)
+
+    form = _run(flow.async_step_cleanup())
+    assert "RYYJ-R8229.json" in form["description_placeholders"]["fixtures"]
+    assert "RYYJ-R8229-20260101-1200.md" in form["description_placeholders"]["exports"]
+
+    result = _run(
+        flow.async_step_cleanup(
+            {"remove_drafts": True, "remove_fixtures": True, "remove_exports": False}
+        )
+    )
+    assert result["reason"] == "drafts_removed"
+    assert not (drafts / "draft-RYYJ-R8229.yaml").exists()
+    assert not (fixtures / "RYYJ-R8229.json").exists()
+    assert (exports / "RYYJ-R8229-20260101-1200.md").exists()
+    assert hass.executor_calls == ["_list_artefacts", "_remove_selected"]
 
 def test_keeping_drafts_deletes_nothing(tmp_path: Path) -> None:
     directory = _drafts_dir(tmp_path)

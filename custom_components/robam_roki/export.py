@@ -137,8 +137,58 @@ def observed_index(learned: Any) -> dict[str, dict[str, Any]]:
     return index
 
 
+#: The drafter appends "；观察到 level 0 → 3, ..." to each control line.
+_OBSERVED_COMMENT = re.compile(
+    r"^\s*[A-Za-z0-9_]+:\s*#.*?；\s*观察到\s+(.+)$"
+)
+_OBSERVED_PART = re.compile(r"([A-Za-z0-9_]+)\s+(\S+)\s*→\s*(\S+)")
+
+
+def _coerce(value: str) -> Any:
+    """Numbers come back as numbers; everything else stays text."""
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def observed_from_profile_comments(
+    profile_yaml: str,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Recover the property diffs the drafter wrote as YAML comments.
+
+    The profile file is the only durable copy of a learning session (the
+    in-memory groups are gone after a reload), so the checklist reads the
+    evidence back from the comments the drafter emitted next to each control.
+    """
+    index: dict[str, dict[str, dict[str, Any]]] = {}
+    current: str | None = None
+    for line in profile_yaml.splitlines():
+        if not line.startswith((" ", "\t")) and line.strip():
+            current = None
+        match = _OBSERVED_COMMENT.match(line)
+        if match is None:
+            continue
+        key_match = re.match(r"^\s*([A-Za-z0-9_]+):", line)
+        if key_match is None:
+            continue
+        current = key_match.group(1)
+        changes: dict[str, Any] = {}
+        for part in match.group(1).split(", "):
+            piece = _OBSERVED_PART.match(part.strip())
+            if piece is not None:
+                changes[piece.group(1)] = {
+                    "from": _coerce(piece.group(2)),
+                    "to": _coerce(piece.group(3)),
+                }
+        if changes:
+            index[current] = changes
+    return index
+
 def _control_rows(
-    controls: dict[str, dict[str, Any]], observed: dict[str, dict[str, Any]]
+    controls: dict[str, dict[str, Any]],
+    observed: dict[str, dict[str, Any]],
+    observed_by_key: dict[str, dict[str, Any]] | None = None,
 ) -> list[list[str]]:
     rows: list[list[str]] = []
     for key, entry in controls.items():
@@ -150,6 +200,8 @@ def _control_rows(
             changes = observed.get(f"{int(command)}:{str(body or '').lower()}")
         else:
             changes = None
+        if not changes and observed_by_key:
+            changes = observed_by_key.get(str(key))
         rows.append(
             [
                 str(key),
@@ -191,7 +243,10 @@ def build_export_markdown(
 ) -> str:
     """Compose the whole export document (five sections, two marker blocks)."""
     observed = observed_index(learned)
-    rows = _control_rows(controls or {}, observed)
+    observed_by_key = (
+        {} if observed else observed_from_profile_comments(profile_yaml)
+    )
+    rows = _control_rows(controls or {}, observed, observed_by_key)
     safe_fixture = dict(fixture or {})
     # Both halves of the privacy policy: value patterns (phone numbers, tokens,
     # 32-hex ids) and key names that are secrets by definition (appGuid,

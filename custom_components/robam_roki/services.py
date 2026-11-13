@@ -21,9 +21,10 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
+from . import builtin as builtin_support
 from .api import RokiApiError
 from .const import DOMAIN, LEARN_DEFAULT_SECONDS, LEARN_MAX_SECONDS
-from .devices import PYTHON_DRIVERS, get_driver_for_device
+from .devices import get_driver_for_device
 from .draft import (
     DraftResult,
     controls_from_actions,
@@ -33,6 +34,11 @@ from .export import build_export_markdown, export_filename
 from .profiles import SOURCE_BUILTIN, match_profile
 
 _LOGGER = logging.getLogger(__name__)
+
+#: The built-in driver coverage lives in builtin.py so the CLI can answer the
+#: same questions; these aliases keep the call sites below readable.
+_builtin_driver = builtin_support.builtin_driver
+_expect_values = builtin_support.expect_values
 
 SERVICE_NAME = "draft_profile"
 LEARN_START_SERVICE = "learn_start"
@@ -243,81 +249,8 @@ def _build_driver(
         return None
 
 
-#: camelCase/snake_case aliases between the cloud properties and the driver.
-_PROPERTY_ALIASES = {
-    "working_status": "workStatus",
-    "light_status": "lightStatus",
-}
-
-
-def _covered_control_properties(driver: Any) -> set[str]:
-    """Property keys the driver already exposes as controls.
-
-    A drafted sensor for one of these keys would duplicate the entity the
-    control already writes (level, light, power, countdown), so the draft
-    skips them the same way it skips the driver's own sensor keys.
-    """
-    keys: set[str] = set()
-    try:
-        commands = driver.commands() or {}
-    except Exception:  # noqa: BLE001 - a broken driver must not kill the draft
-        return keys
-    for spec in commands.values():
-        for payload in (spec.on, spec.off):
-            if isinstance(payload, dict):
-                for key in payload:
-                    keys.add(str(key))
-                    keys.add(_PROPERTY_ALIASES.get(str(key), str(key)))
-        if spec.param:
-            keys.add(str(spec.param))
-        if spec.params:
-            keys.update(str(key) for key in spec.params)
-    if "timing" in commands:
-        keys.add("timing")
-    return keys
-
-
-def _builtin_driver(driver: Any) -> tuple[str | None, frozenset[str] | None]:
-    """Name and entity keys of the built-in Python driver behind this driver.
-
-    A driver generated from a profile is not in the registry, so it gets no
-    extends line: the draft itself is the replacement profile.
-    """
-    if driver is None:
-        return None, None
-    for name, driver_cls in PYTHON_DRIVERS.items():
-        if type(driver) is driver_cls:
-            keys = {spec.key for spec in driver.sensors()}
-            keys |= {spec.key for spec in driver.binary_sensors()}
-            keys |= _covered_control_properties(driver)
-            return name, frozenset(keys)
-    return None, None
-
-
-def _expect_values(
-    driver: Any, properties: dict[str, Any]
-) -> dict[str, Any]:
-    """Expected entity values computed with the device's current driver."""
-    expect: dict[str, Any] = {}
-    if driver is None:
-        return expect
-    for spec in driver.sensors():
-        if spec.value_fn is not None:
-            try:
-                expect[spec.key] = spec.value_fn(properties)
-            except Exception:  # noqa: BLE001 - keep the rest of the fixture
-                expect[spec.key] = None
-        else:
-            expect[spec.key] = properties.get(spec.key)
-    for spec in driver.binary_sensors():
-        if spec.is_on_fn is not None:
-            try:
-                expect[spec.key] = spec.is_on_fn(properties)
-            except Exception:  # noqa: BLE001 - keep the rest of the fixture
-                expect[spec.key] = None
-        else:
-            expect[spec.key] = properties.get(spec.key)
-    return expect
+#: The built-in driver coverage lives in builtin.py so the standalone CLI can
+#: produce exactly the same extends / skipped-keys / expect answers.
 
 
 def _unique_paths(
@@ -418,7 +351,7 @@ def _notify_success(
     if fixture_path is not None:
         lines.append(f"  fixture：{fixture_path}")
     lines.append(
-        "  下一步：编辑 → 设置 → 设备与服务 → ROBAM ROKI → 重新加载 → 查看实体"
+        "  下一步：设置 → 设备与服务 → 集成 → ROBAM ROKI → ⋮ → 重新加载 → 查看实体"
     )
     if entries:
         lines.append(

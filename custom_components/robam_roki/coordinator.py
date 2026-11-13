@@ -27,6 +27,7 @@ from .api import (
 )
 from .commands import UnverifiedCommandError
 from .commands import execute as execute_command
+from .draft import strip_frame_envelope
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ALLOW_UNVERIFIED_CONTROLS,
@@ -901,7 +902,8 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         state["cancel"] = self._schedule_learn_timeout(seconds)
         name = self.device_info_for(device_id).get("name") or device_id
         self._notify(
-            f"已开始学习 {name}（最长 {seconds} 秒）。"
+            f"已开始学习 {name}（最长 {seconds} 秒，到时间会自动结束，"
+            "也可以手动提前结束）。\n"
             "现在用官方 App 操作你要的功能；学习期间不会发送任何命令。",
             title="ROBAM ROKI 学习模式",
         )
@@ -1037,7 +1039,9 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             {
                 "offset_ms": action_offset,
                 "command": payload[17],
-                "body_hex": body[:LEARN_MAX_BODY_BYTES].hex(),
+                "body_hex": strip_frame_envelope(
+                    body[:LEARN_MAX_BODY_BYTES].hex()
+                ),
                 "truncated": truncated,
                 "observed": {},
             }

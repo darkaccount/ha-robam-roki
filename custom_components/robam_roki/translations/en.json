@@ -241,8 +241,10 @@
         "title": "ROKI options",
         "menu_options": {
           "general": "General settings",
-          "learn": "Learn a new device control",
-          "cleanup": "Clean up drafts"
+          "learn": "1. Learn a new device control",
+          "draft": "2. Generate a draft",
+          "export": "3. Export a contribution package",
+          "cleanup": "4. Clean up drafts"
         }
       },
       "general": {
@@ -257,32 +259,71 @@
         }
       },
       "learn": {
-        "title": "Learn a new device control",
-        "description": "Current learning session: {status}\n\nPick the device and the duration, set the action to start, then operate the feature in the official App. Come back and choose stop when you are done, then call robam_roki.draft_profile to draft the profile. No command is sent to the appliance while learning.",
+        "title": "1. Learn a new device control",
+        "description": "Current learning session: {status}\n\nPick a device and duration, choose Start, then operate the feature in the official App. A session lasts at most 600 seconds and ends by itself — stopping it here is optional.\n\nStopping writes no files: go back to the menu and choose \"2. Generate a draft\". No command is ever sent to the device while learning.",
         "data": {
           "device_id": "Device",
-          "duration": "Learning duration (seconds)",
+          "duration": "Duration in seconds (max 600)",
           "action": "Action (start / stop)"
         }
       },
-      "cleanup": {
-        "title": "Clean up drafts",
-        "description": "Draft files found: {drafts}\n\nOnly draft-*.yaml files are deleted; profiles you wrote by hand are untouched.",
+      "draft": {
+        "title": "2. Generate a draft",
+        "description": "{learned}\n\nPicking a device generates a draft- profile (an existing file is never overwritten: the new one gets -2/-3), then asks how to apply it.",
         "data": {
-          "remove_drafts": "Delete these drafts"
+          "device_id": "Device"
+        }
+      },
+      "draft_confirm": {
+        "title": "Draft written, confirm the next step",
+        "description": "Written: {file}\n{note}\n\n{controls}\n\n\"Allow unverified controls\" is off: the learned buttons will not appear. Tick the option below to enable it and reload now; it also affects unverified controls of other devices.",
+        "data": {
+          "enable_unverified_controls": "Enable \"allow unverified controls\" and reload now (affects other devices)",
+          "reload_now": "Reload Home Assistant integrations now so the draft takes effect"
+        }
+      },
+      "draft_confirm_enabled": {
+        "title": "Draft written, confirm the next step",
+        "description": "Written: {file}\n{note}\n\n{controls}\n\n\"Allow unverified controls\" is already on: the learned buttons work after a reload.",
+        "data": {
+          "reload_now": "Reload Home Assistant integrations now so the draft takes effect"
+        }
+      },
+      "export": {
+        "title": "3. Export a contribution package",
+        "description": "Picking a device merges the active user profile and its fixture into one Markdown file (no yaml/json is written); the persistent notification gives the path.",
+        "data": {
+          "device_id": "Device"
+        }
+      },
+      "cleanup": {
+        "title": "4. Clean up drafts",
+        "description": "Generated draft files: {drafts}\n\nA learning session also leaves a fixture and an export bundle:\n- fixtures directory: {fixtures}\n- exports directory: {exports}\n\nTick what should be deleted; anything left unticked stays. Hand-written profiles are never touched.",
+        "data": {
+          "remove_drafts": "Delete drafts (draft-*.yaml)",
+          "remove_fixtures": "Delete fixtures (fixtures/*.json)",
+          "remove_exports": "Delete export bundles (exports/*.md)"
         }
       }
     },
     "error": {
       "invalid_levels": "Enter positive levels separated by commas, for example 1,2,3,6",
-      "device_required": "Select the device to learn"
+      "device_required": "Select a device"
     },
     "abort": {
-      "learn_started": "Learning started: operate the feature in the official App, then come back here and choose stop.",
-      "learn_stopped": "Learning finished: call robam_roki.draft_profile to draft a profile with controls.",
+      "learn_started": "Learning started: operate the feature in the official App now. A session ends by itself after at most 600 seconds, or stop it here early.",
+      "learn_stopped": "Learning finished with {count} action(s). Go back to the menu and choose \"2. Generate a draft\".",
       "learn_failed": "The learning action failed: another session may be running; see the Home Assistant log.",
-      "drafts_removed": "Drafts deleted.",
-      "drafts_kept": "Drafts kept, nothing was changed."
+      "draft_failed": "Could not generate the draft: check that the integration is loaded and the device has cached properties; see the Home Assistant log.",
+      "draft_enabled": "\"Allow unverified controls\" was enabled and the integration reloaded: the draft {file} is active.",
+      "draft_reloaded": "The draft {file} is active (integration reloaded).",
+      "draft_written": "The draft {file} was written: reload the integration manually to see the entities.",
+      "export_done": "Export finished: the path is in the persistent notification. Paste that .md into https://github.com/darkaccount/ha-robam-roki/issues/new?template=device_support.yml or open a PR.",
+      "export_no_profile": "This device has no user profile yet: use \"2. Generate a draft\" first.",
+      "export_builtin": "This device is already covered by a built-in profile: open an issue describing the problem instead of exporting.",
+      "export_failed": "Export failed; see the Home Assistant log.",
+      "drafts_removed": "Removed {drafts} draft(s), {fixtures} fixture(s) and {exports} export bundle(s). If any button entity became unavailable, delete it from Settings → Entities.",
+      "drafts_kept": "Nothing was ticked, so nothing was deleted."
     }
   }
 }

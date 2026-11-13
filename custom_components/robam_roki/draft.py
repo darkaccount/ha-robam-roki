@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 try:  # normal package import (integration and its test suite)
     from .redact import redact_properties
 except ImportError:  # loaded straight from the file system by the CLI
@@ -43,6 +45,19 @@ BUNDLE_SCHEMA = "roki-bundle/1"
 #: A callable computes the expected entity values for a fixture from the
 #: captured properties; it is usually the real driver in a dict comprehension.
 ExpectFn = Callable[[dict[str, Any]], dict[str, Any]]
+
+#: A callable that answers "what does the built-in driver cover?", returning
+#: (extends name, covered keys, expect function).  It lets the CLI hand the
+#: drafter the driver coverage without the drafter importing Home Assistant.
+BuiltinResolver = Callable[
+    [dict[str, Any]],
+    tuple[
+        str | None,
+        Iterable[str] | None,
+        Callable[[dict[str, Any]], dict[str, Any]] | None,
+    ]
+    | None,
+]
 
 _TEMPERATURE_KEY = re.compile(r"temp|温度", re.IGNORECASE)
 
@@ -69,7 +84,7 @@ CONTROL_TEMPLATE: tuple[str, ...] = (
     "#     verified: false",
 )
 
-def _strip_frame_prefix(body_hex: str) -> str:
+def strip_frame_envelope(body_hex: str) -> str:
     """Drop the terminal byte and the ascii user id from a captured body.
 
     The learning session records the whole marshalled body because that is
@@ -111,7 +126,7 @@ def _normalise_learned(learned: Any) -> list[dict[str, Any]]:
         usable = [
             {
                 **frame,
-                "body_hex": _strip_frame_prefix(
+                "body_hex": strip_frame_envelope(
                     str(frame.get("body_hex") or "")
                 ),
             }
@@ -125,6 +140,15 @@ def _normalise_learned(learned: Any) -> list[dict[str, Any]]:
 
 #: Command numbers the protocol already documents, used to name a learned
 #: control when no property change was observed around its frame.
+
+def _payload_byte(body_hex: str) -> int | None:
+    """The last payload byte, which is the value most commands carry."""
+    try:
+        raw = bytes.fromhex(str(body_hex or ""))
+    except ValueError:
+        return None
+    return raw[-1] if raw else None
+
 FALLBACK_NAME_BY_COMMAND: dict[int, str] = {
     132: "开机/关机",
     134: "设置档位",
@@ -179,7 +203,17 @@ def suggest_control_name(entry: dict[str, Any]) -> str:
     if light == 0:
         return "关灯"
 
+    # The payload byte is protocol evidence, so it names the control even
+    # when no property change was observed in time for the group.
     command = _as_int(entry.get("command"))
+    value = _payload_byte(str(entry.get("body_hex") or ""))
+    if command == 134 and value is not None and value > 0:
+        return f"设置档位 {value}"
+    if command == 132 and value is not None:
+        return "关机" if value == 0 else "开机"
+    if command == 136 and value is not None:
+        return "关灯" if value == 0 else "开灯"
+
     if command is not None and command in FALLBACK_NAME_BY_COMMAND:
         return FALLBACK_NAME_BY_COMMAND[command]
     return f"动作 {int(entry.get('index') or 1)}"
@@ -231,13 +265,25 @@ def controls_from_actions(learned: Any) -> list[dict[str, Any]]:
             )
     return entries
 
-def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
-    """Render the learned controls section with its review comments."""
-    lines = [
-        "# learned controls: verified is false; check each one with the",
-        "# experimental-controls option before trusting it.",
-        "controls:",
-    ]
+def covered_properties(
+    properties: dict[str, Any], builtin_keys: Iterable[str] | None
+) -> list[str]:
+    """The captured property keys the built-in driver already exposes.
+
+    The CLI lists these so a contributor can see why a key did not become a
+    sensor: the driver already publishes it as an entity.
+    """
+    if not builtin_keys:
+        return []
+    covered = {_canonical_key(key) for key in builtin_keys}
+    return sorted(
+        str(key) for key in properties if _canonical_key(key) in covered
+    )
+
+
+def _learned_control_body_lines(entries: list[dict[str, Any]]) -> list[str]:
+    """Render only the learned control entries (no controls: header)."""
+    lines: list[str] = []
     previous_group: int | None = None
     for entry in entries:
         if entry["group_index"] != previous_group:
@@ -250,8 +296,8 @@ def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
         observed = entry.get("observed") or {}
         if observed:
             effect = "；观察到 " + ", ".join(
-                f"{key} {change.get('from')} → {change.get('to')}"
-                for key, change in observed.items()
+                f"{key} {observed[key].get('from')} → {observed[key].get('to')}"
+                for key in sorted(observed, key=str)
             )
         body = entry["body_hex"] or "(空)"
         lines.append(
@@ -267,6 +313,139 @@ def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
         lines.append(f"    body_hex: {_yaml_string(entry['body_hex'])}")
         lines.append("    verified: false")
     return lines
+
+
+def _learned_control_lines(entries: list[dict[str, Any]]) -> list[str]:
+    """Render the learned controls section with its review comments."""
+    return [
+        "# learned controls: verified is false; check each one with the",
+        "# experimental-controls option before trusting it.",
+        "controls:",
+        *_learned_control_body_lines(entries),
+    ]
+
+
+#: A control key the drafter generated: action_1, action_2, ...
+_ACTION_KEY = re.compile(r"^action_(d+)$")
+
+
+@dataclass
+class MergeResult:
+    """One merge: the new profile YAML plus what changed."""
+
+    profile_yaml: str
+    added: list[str] = field(default_factory=list)
+    kept: list[str] = field(default_factory=list)
+    skipped: list[tuple[int, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def _control_pairs(controls: dict[str, Any]) -> set[tuple[int, str]]:
+    """The (command, body) identities a profile's controls already hold."""
+    pairs: set[tuple[int, str]] = set()
+    for entry in controls.values():
+        if not isinstance(entry, dict):
+            continue
+        command = _as_int(entry.get("command"))
+        if command is None:
+            continue
+        body = strip_frame_envelope(str(entry.get("body_hex") or "")).lower()
+        pairs.add((command, body))
+    return pairs
+
+
+def _controls_block_bounds(lines: list[str]) -> tuple[int, int] | None:
+    """(first body line, end) of the top-level controls mapping, or None."""
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == "controls:" and not line[:1].isspace():
+            start = index + 1
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if not lines[index].strip():
+            continue
+        if not lines[index][:1].isspace():
+            end = index
+            break
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return start, end
+
+
+def merge_controls(profile_yaml: str, learned: Any) -> MergeResult:
+    """Merge learned controls into an existing profile, keeping everything else.
+
+    The profile text is edited in place -- it is never re-rendered -- so the
+    header comments, sensors, binary_sensors and any hand edits survive
+    untouched.  A frame is identified by (command, body) after the capture
+    envelope is stripped, the same identity the drafter uses, so re-capturing
+    a button does not duplicate its entry; a new button appends action_N after
+    the highest action_N already present.
+    """
+    result = MergeResult(profile_yaml=profile_yaml)
+    try:
+        document = yaml.safe_load(profile_yaml)
+    except yaml.YAMLError as err:
+        result.warnings.append(
+            f"profile is not valid YAML ({err}); nothing was merged"
+        )
+        return result
+    if not isinstance(document, dict):
+        result.warnings.append("profile is not a mapping; nothing was merged")
+        return result
+    controls = document.get("controls")
+    if not isinstance(controls, dict):
+        controls = {}
+    result.kept = [str(key) for key in controls]
+    known = _control_pairs(controls)
+
+    entries = controls_from_actions(learned)
+    if not entries:
+        return result
+
+    numbers = [
+        int(match.group(1))
+        for key in controls
+        if (match := _ACTION_KEY.match(str(key))) is not None
+    ]
+    next_index = max(numbers, default=0) + 1
+    taken = {str(key) for key in controls}
+    fresh: list[dict[str, Any]] = []
+    for entry in entries:
+        body = strip_frame_envelope(str(entry.get("body_hex") or "")).lower()
+        pair = (int(entry["command"]), body)
+        if pair in known:
+            result.skipped.append(pair)
+            continue
+        known.add(pair)
+        while f"action_{next_index}" in taken:
+            next_index += 1
+        entry = dict(entry, index=next_index, name=f"action_{next_index}")
+        taken.add(entry["name"])
+        result.added.append(entry["name"])
+        fresh.append(entry)
+        next_index += 1
+    if not fresh:
+        return result
+
+    body_lines = _learned_control_body_lines(fresh)
+    lines = profile_yaml.splitlines()
+    bounds = _controls_block_bounds(lines)
+    if bounds is None:
+        merged = [*lines, "", "controls:", *body_lines]
+    else:
+        _start, end = bounds
+        merged = [*lines[:end], *body_lines, *lines[end:]]
+    result.profile_yaml = "\n".join(merged) + "\n"
+    return result
+
+
+def merge_controls_into_profile(profile_yaml: str, learned: Any) -> str:
+    """The profile YAML with the learned controls merged in (comments kept)."""
+    return merge_controls(profile_yaml, learned).profile_yaml
 
 
 _HEADER: tuple[str, ...] = (
@@ -523,6 +702,15 @@ def _builtin_coverage(driver_name: str) -> frozenset[str]:
 # -- fixture rendering ---------------------------------------------------
 
 
+def _fixture_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """Drop the protocol bookkeeping: it is capture metadata, not state."""
+    return {
+        key: value
+        for key, value in properties.items()
+        if _canonical_key(key) not in PROTOCOL_METADATA_KEYS
+    }
+
+
 def _build_fixture(
     device: dict[str, Any],
     properties: dict[str, Any],
@@ -560,7 +748,7 @@ def _build_fixture(
         "schema": FIXTURE_SCHEMA,
         "source": source,
         "match": match,
-        "properties": redact_properties(properties),
+        "properties": redact_properties(_fixture_properties(properties)),
         "expect": expect,
     }
 
@@ -574,8 +762,26 @@ def _draft(
     builtin_driver: str | None = None,
     builtin_keys: Iterable[str] | None = None,
     learned_controls: Any | None = None,
+    builtin_resolver: BuiltinResolver | None = None,
 ) -> DraftResult:
     warnings: list[str] = []
+    if builtin_resolver is not None and isinstance(device, dict):
+        # Explicit arguments win; the resolver only fills what the caller did
+        # not already know (the CLI passes the resolver, the HA service the
+        # explicit values).
+        resolved = None
+        try:
+            resolved = builtin_resolver(device)
+        except Exception as err:  # noqa: BLE001 - coverage is an optimisation
+            warnings.append(f"built-in driver coverage failed ({err}); ignored")
+        if resolved:
+            name, keys, resolved_expect = resolved
+            if builtin_driver is None:
+                builtin_driver = name
+            if builtin_keys is None:
+                builtin_keys = keys
+            if expect_fn is None:
+                expect_fn = resolved_expect
     if not isinstance(device, dict):
         return DraftResult(
             "", {}, ["device is not a mapping; nothing was drafted"]
@@ -618,8 +824,9 @@ def _draft(
         learned_controls=learned_controls,
     )
     warnings.extend(render_warnings)
-    # The fixture always keeps the full captured payload, including the keys
-    # the built-in driver already covers: it is the regression evidence.
+    # The fixture keeps every captured state key, including the ones the
+    # built-in driver already covers (it is the regression evidence), but
+    # drops protocol bookkeeping such as lastUpdateTime.
     fixture = _build_fixture(
         device, properties, source=source, expect_fn=expect_fn, warnings=warnings
     )
@@ -662,6 +869,7 @@ def draft_from_bundle(
     *,
     expect_fn: ExpectFn | None = None,
     learned_controls: Any | None = None,
+    builtin_resolver: BuiltinResolver | None = None,
 ) -> DraftResult:
     """Draft from a roki-bundle/1 capture produced by the CLI collector."""
     if not isinstance(bundle, dict):
@@ -678,6 +886,7 @@ def draft_from_bundle(
         source="bundle",
         expect_fn=expect_fn,
         learned_controls=learned_controls,
+        builtin_resolver=builtin_resolver,
     )
     return DraftResult(
         result.profile_yaml, result.fixture, [*warnings, *result.warnings]
@@ -762,6 +971,7 @@ def draft_from_diagnostics(
     dt: Any = None,
     expect_fn: ExpectFn | None = None,
     learned_controls: Any | None = None,
+    builtin_resolver: BuiltinResolver | None = None,
 ) -> DraftResult:
     """Draft from a Home Assistant diagnostics export.
 
@@ -795,6 +1005,7 @@ def draft_from_diagnostics(
         source="auto",
         expect_fn=expect_fn,
         learned_controls=learned_controls,
+        builtin_resolver=builtin_resolver,
     )
     return DraftResult(
         result.profile_yaml, result.fixture, [*warnings, *result.warnings]

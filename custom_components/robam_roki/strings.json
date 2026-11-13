@@ -241,8 +241,10 @@
         "title": "ROKI 选项",
         "menu_options": {
           "general": "常规设置",
-          "learn": "学习新设备控制",
-          "cleanup": "清理草稿"
+          "learn": "1. 学习新设备控制",
+          "draft": "2. 生成草稿",
+          "export": "3. 导出贡献包",
+          "cleanup": "4. 清理草稿"
         }
       },
       "general": {
@@ -257,32 +259,71 @@
         }
       },
       "learn": {
-        "title": "学习新设备控制",
-        "description": "当前学习会话：{status}\n\n先选设备与时长、动作选「开始」，然后用官方 App 操作要接入的功能；完成后回到这里选「结束」，再调用 robam_roki.draft_profile 生成草稿。学习期间不会向设备发送任何命令。",
+        "title": "1. 学习新设备控制",
+        "description": "当前学习会话：{status}\n\n先选设备与时长、动作选「开始」，然后用官方 App 操作要接入的功能。学习时长最长 600 秒，到时间会自动结束，不需要手动停止；想提前结束就回到这里选「结束」。\n\n结束这一步不会写文件，请回菜单选「2. 生成草稿」。学习期间不会向设备发送任何命令。",
         "data": {
           "device_id": "设备",
-          "duration": "学习时长（秒）",
+          "duration": "学习时长（秒，最长 600）",
           "action": "动作（开始 / 结束）"
         }
       },
-      "cleanup": {
-        "title": "清理草稿",
-        "description": "发现以下草稿文件：{drafts}\n\n只会删除 draft-*.yaml；你手写的 profile 不受影响。",
+      "draft": {
+        "title": "2. 生成草稿",
+        "description": "{learned}\n\n选设备后会生成 draft 开头的 profile 草稿（同名文件自动加 -2/-3，绝不覆盖旧文件），并在下一步确认怎么生效。",
         "data": {
-          "remove_drafts": "删除这些草稿"
+          "device_id": "设备"
+        }
+      },
+      "draft_confirm": {
+        "title": "草稿已生成，确认下一步",
+        "description": "已写入：{file}\n{note}\n\n{controls}\n\n「允许未验证的控制」未开启：学到的按钮不会出现。勾选下面的选项可以现在开启并重载；这会影响其它设备的未验证控制。",
+        "data": {
+          "enable_unverified_controls": "开启「允许未验证的控制」并立即重载（会影响其它设备）",
+          "reload_now": "现在重载集成让草稿生效"
+        }
+      },
+      "draft_confirm_enabled": {
+        "title": "草稿已生成，确认下一步",
+        "description": "已写入：{file}\n{note}\n\n{controls}\n\n「允许未验证的控制」已开启：重载后学到的按钮即可使用。",
+        "data": {
+          "reload_now": "现在重载集成让草稿生效"
+        }
+      },
+      "export": {
+        "title": "3. 导出贡献包",
+        "description": "选设备后，把当前生效的用户 profile 与 fixture 合成一份 Markdown（只输出 .md，不写 yaml/json），持久通知里会给出文件路径。",
+        "data": {
+          "device_id": "设备"
+        }
+      },
+      "cleanup": {
+        "title": "4. 清理草稿",
+        "description": "生成的草稿文件：{drafts}\n\n一次学习还会留下 fixture 与导出包：\n- fixture（fixtures 目录）：{fixtures}\n- 导出包（exports 目录）：{exports}\n\n勾选要删除的项目，不勾的保持原样；手写的 profile 永远不会被删除。",
+        "data": {
+          "remove_drafts": "删除草稿（draft-*.yaml）",
+          "remove_fixtures": "删除 fixture（fixtures/*.json）",
+          "remove_exports": "删除导出包（exports/*.md）"
         }
       }
     },
     "error": {
       "invalid_levels": "请输入用逗号分隔的正整数档位，例如 1,2,3,6",
-      "device_required": "请选择要学习的设备"
+      "device_required": "请选择设备"
     },
     "abort": {
-      "learn_started": "已开始学习：现在用官方 App 操作要接入的功能，完成后回到选项里选「结束」。",
-      "learn_stopped": "学习已结束：可调用 robam_roki.draft_profile 生成带 controls 的草稿。",
+      "learn_started": "已开始学习：现在用官方 App 操作要接入的功能。最长 600 秒后自动结束，也可以回到这里手动提前结束。",
+      "learn_stopped": "已结束学习，共记录 {count} 个动作。请回到菜单选择「2. 生成草稿」。",
       "learn_failed": "学习操作失败：可能已有其它学习会话在进行，详见 Home Assistant 日志。",
-      "drafts_removed": "草稿已删除。",
-      "drafts_kept": "已保留草稿，未做任何修改。"
+      "draft_failed": "生成草稿失败：请确认集成已加载、该设备有缓存属性，详见 Home Assistant 日志。",
+      "draft_enabled": "已开启「允许未验证的控制」并重载集成，草稿 {file} 已生效。",
+      "draft_reloaded": "草稿 {file} 已生效（集成已重载）。",
+      "draft_written": "草稿 {file} 已写入：请手动重载集成后查看实体。",
+      "export_done": "导出完成：文件路径见持久通知。把这份 .md 贴到 https://github.com/darkaccount/ha-robam-roki/issues/new?template=device_support.yml 或直接提 PR。",
+      "export_no_profile": "该设备还没有用户 profile：先用「2. 生成草稿」。",
+      "export_builtin": "该设备已由内置 profile 支持：请直接提 issue 说明问题，不需要导出 profile。",
+      "export_failed": "导出失败，详见 Home Assistant 日志。",
+      "drafts_removed": "已删除：草稿 {drafts} 个、fixture {fixtures} 个、导出包 {exports} 个。相关按钮实体如果变为不可用，可在「设置 → 实体」里手动删除。",
+      "drafts_kept": "未勾选任何项目，没有删除任何文件。"
     }
   }
 }
