@@ -1,0 +1,64 @@
+{
+  "schema": "roki-bundle/1",
+  "created": "2026-11-13T00:00:00Z",
+  "device": {
+    "dc": "RYYJ",
+    "dt": "R8229",
+    "transport": "mqtt"
+  },
+  "properties": {
+    "workStatus": 1,
+    "level": 3,
+    "lightStatus": 0,
+    "timing": 0
+  },
+  "frames": [
+    [
+      0,
+      131,
+      "01020000"
+    ],
+    [
+      1500,
+      131,
+      "01030000"
+    ]
+  ],
+  "observations": [
+    {
+      "t": 1500,
+      "label": "auto",
+      "changes": {
+        "level": {
+          "from": 2,
+          "to": 3
+        }
+      }
+    }
+  ],
+  "commands": [
+    {
+      "index": 0,
+      "command": 134,
+      "body_hex": "02",
+      "observed": {
+        "level": {
+          "from": 2,
+          "to": 3
+        }
+      }
+    },
+    {
+      "index": 1,
+      "command": 132,
+      "body_hex": "01",
+      "observed": {
+        "workStatus": {
+          "from": 0,
+          "to": 1
+        }
+      }
+    }
+  ],
+  "truncated": false
+}

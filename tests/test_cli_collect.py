@@ -92,8 +92,17 @@ def _draft_args(tmp_path: Path, source: Path, **overrides: Any) -> types.SimpleN
     return types.SimpleNamespace(**values)
 
 
+OTHER_APP_GUID = "ANOTHERAPP0000000"
+
+
+def _command_frame(source: str, command: int, body: bytes = b"") -> bytes:
+    """A synthetic frame from some app to the device (17-byte source)."""
+    return source.encode("ascii") + bytes([command]) + body
+
+
 class _FakeClient:
     user_id = "1234567890"
+    app_guid = APP_GUID
 
     def __init__(self, devices: list[dict[str, Any]]) -> None:
         self.devices = devices
@@ -357,6 +366,103 @@ DIAGNOSTICS_INPUT: dict[str, Any] = {
 }
 
 
+# -- external command frames (the CLI learning channel) ------------------
+
+
+def _command_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    clock = [1000.0]
+    monkeypatch.setattr(cli.time, "monotonic", lambda: clock[0])
+    return clock
+
+
+def test_command_frames_use_the_learning_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _command_clock(monkeypatch)
+    collector = cli._Collector(DEVICE_GUID, app_guid=APP_GUID)
+    collector.set_properties({"workStatus": 0, "level": 0})
+
+    # Dropped: reads (130/128), the appliance itself, our own app.
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 130, b""))
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 128, b""))
+    collector.handle_command_frame(_command_frame(DEVICE_GUID, 134, b"\x02"))
+    collector.handle_command_frame(_command_frame(APP_GUID, 132, b"\x01"))
+    assert collector.commands == []
+
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 134, b"\x02"))
+    clock[0] += 1.0
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 130, b""))
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 132, b"\x01"))
+    assert [entry["command"] for entry in collector.commands] == [134, 132]
+    assert [entry["index"] for entry in collector.commands] == [0, 1]
+    assert [entry["body_hex"] for entry in collector.commands] == ["02", "01"]
+
+
+def test_command_frames_are_grouped_by_the_learning_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _command_clock(monkeypatch)
+    collector = cli._Collector(DEVICE_GUID, app_guid=APP_GUID)
+    collector.set_properties({"workStatus": 0, "level": 0})
+
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 134, b"\x02"))
+    clock[0] += 0.5
+    collector.set_properties({"workStatus": 0, "level": 2})
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 132, b"\x01"))
+
+    clock[0] += 5.0  # a new action: past the 2.5 s group gap
+    collector.set_properties({"workStatus": 1, "level": 2})
+    collector.handle_command_frame(_command_frame(OTHER_APP_GUID, 134, b"\x06"))
+    clock[0] += 1.0
+    collector.set_properties({"workStatus": 1, "level": 3})
+
+    bundle = collector.bundle(DEVICE, "mqtt")
+    commands = bundle["commands"]
+    assert [entry["command"] for entry in commands] == [134, 132, 134]
+    # Every frame of one group carries the diff observed when it closed.
+    assert commands[0]["observed"] == {
+        "workStatus": {"from": 0, "to": 1},
+        "level": {"from": 0, "to": 2},
+    }
+    assert commands[1]["observed"] == commands[0]["observed"]
+    assert commands[2]["observed"] == {"level": {"from": 2, "to": 3}}
+    assert set(commands[0]) == {"index", "command", "body_hex", "observed"}
+
+
+def test_command_frames_stop_at_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _command_clock(monkeypatch)
+    collector = cli._Collector(DEVICE_GUID, app_guid=APP_GUID, max_commands=2)
+    for index in range(5):
+        collector.handle_command_frame(
+            _command_frame(OTHER_APP_GUID, 134, bytes([index]))
+        )
+    assert len(collector.commands) == 2
+    assert collector.truncated is True
+
+
+def test_collect_records_the_app_frames_it_observes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frames = [
+        _report(),
+        _command_frame(OTHER_APP_GUID, 130),  # read-only: ignored
+        _command_frame(OTHER_APP_GUID, 134, b"\x02"),
+        _command_frame(DEVICE_GUID, 134, b"\x03"),  # the device itself
+        _command_frame(APP_GUID, 132, b"\x01"),  # our own app
+    ]
+    session = _install_fake_session(monkeypatch, frames)
+    client = _FakeClient([DEVICE])
+    asyncio.run(cli.cmd_collect(client, _collect_args(tmp_path)))
+
+    bundle = json.loads((tmp_path / "bundle.json").read_text(encoding="utf-8"))
+    assert [entry["command"] for entry in bundle["commands"]] == [134]
+    assert bundle["commands"][0]["body_hex"] == "02"
+    # The sender guid is never part of the stored body.
+    for entry in bundle["commands"]:
+        assert OTHER_APP_GUID.encode().hex() not in entry["body_hex"]
+        assert APP_GUID.encode().hex() not in entry["body_hex"]
+    assert session.stopped is True
+
 def _write_json(tmp_path: Path, name: str, payload: Any) -> Path:
     path = tmp_path / name
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -382,8 +488,13 @@ def test_draft_detects_a_bundle_and_writes_both_files(
     document = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
     assert document["schema"] == "roki-profile/1"
     assert document["match"] == {"dc": "RYYJ", "dt": "R8229"}
-    assert list(document["sensors"]) == ["guid", "level", "phone", "workStatus"]
+    # The CLI draft now sits at the same level as the HA one: it inherits the
+    # built-in hood driver and only keeps the properties that driver does not
+    # already expose (level/workStatus back its controls).
+    assert document["extends"] == "python:hood"
+    assert list(document["sensors"]) == ["guid", "phone"]
     assert "# source: bundle" in profile_path.read_text(encoding="utf-8")
+    assert "builtin : python:hood (covered keys skipped)" in output
 
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     assert fixture["schema"] == "roki-fixture/1"
@@ -392,6 +503,72 @@ def test_draft_detects_a_bundle_and_writes_both_files(
     assert fixture["properties"]["guid"] == "**REDACTED**"
 
 
+BUNDLE_WITH_COMMANDS = {
+    "schema": "roki-bundle/1",
+    "device": {"dc": "RYYJ", "dt": "R8229", "transport": "mqtt"},
+    "properties": {"workStatus": 1, "level": 2},
+    "frames": [],
+    "observations": [],
+    "commands": [
+        {
+            "index": 0,
+            "command": 132,
+            # terminal type + the App account user id + the payload
+            "body_hex": "0b3132333435363738393001",
+            "observed": {"workStatus": {"from": 0, "to": 1}},
+        },
+        {"index": 1, "command": 134, "body_hex": "02", "observed": {}},
+    ],
+    "truncated": False,
+}
+
+
+def test_draft_uses_the_bundle_commands_without_learned(tmp_path: Path) -> None:
+    source = _write_json(tmp_path, "bundle.json", BUNDLE_WITH_COMMANDS)
+    assert cli.cmd_draft(None, _draft_args(tmp_path, source)) == 0
+
+    profile_path = tmp_path / "out" / "RYYJ-R8229.yaml"
+    document = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    controls = document["controls"]
+    assert list(controls) == ["action_1", "action_2"]
+    # The captured envelope (terminal + user id) is stripped, like the HA
+    # learning session output.
+    assert controls["action_1"]["body_hex"] == "01"
+    assert controls["action_1"]["kind"] == "mqtt"
+    # The observed effect names the control, and it stays unverified.
+    assert controls["action_1"]["name"] == "开机"
+    assert controls["action_1"]["verified"] is False
+    assert controls["action_2"]["command"] == 134
+    assert controls["action_2"]["body_hex"] == "02"
+
+
+def test_learned_flag_overrides_the_bundle_commands(tmp_path: Path) -> None:
+    source = _write_json(tmp_path, "bundle.json", BUNDLE_WITH_COMMANDS)
+    learned_path = _write_json(
+        tmp_path,
+        "learned.json",
+        [{"command": 144, "body_hex": "0f", "observed": {}}],
+    )
+    args = _draft_args(tmp_path, source, learned=str(learned_path))
+    assert cli.cmd_draft(None, args) == 0
+
+    document = yaml.safe_load(
+        (tmp_path / "out" / "RYYJ-R8229.yaml").read_text(encoding="utf-8")
+    )
+    assert list(document["controls"]) == ["action_1"]
+    assert document["controls"]["action_1"]["command"] == 144
+
+
+def test_a_bundle_without_commands_still_drafts_read_only(tmp_path: Path) -> None:
+    source = _write_json(tmp_path, "bundle.json", BUNDLE_INPUT)
+    assert cli.cmd_draft(None, _draft_args(tmp_path, source)) == 0
+    text = (tmp_path / "out" / "RYYJ-R8229.yaml").read_text(encoding="utf-8")
+    document = yaml.safe_load(text)
+    assert "controls" not in document
+    assert "# controls:" in text
+    # It still inherits the built-in driver, exactly like an HA draft.
+    assert document["extends"] == "python:hood"
+
 def test_draft_detects_diagnostics(tmp_path: Path) -> None:
     source = _write_json(tmp_path, "diag.json", DIAGNOSTICS_INPUT)
     rc = cli.cmd_draft(None, _draft_args(tmp_path, source))
@@ -399,8 +576,12 @@ def test_draft_detects_diagnostics(tmp_path: Path) -> None:
     profile_path = tmp_path / "out" / "RYYJ-R8229.yaml"
     assert profile_path.is_file()
     document = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    assert list(document["sensors"]) == ["level"]
-    assert "# source: auto" in profile_path.read_text(encoding="utf-8")
+    assert document["extends"] == "python:hood"
+    # Every captured property (level) is covered by the hood driver now.
+    assert "sensors" not in document
+    text = profile_path.read_text(encoding="utf-8")
+    assert "# sensors: every captured property is already covered" in text
+    assert "# source: auto" in text
 
 
 def test_draft_output_loads_in_the_profile_loader(tmp_path: Path) -> None:
