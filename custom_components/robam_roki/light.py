@@ -13,9 +13,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import RokiAuthError, RokiError
 from .coordinator import RokiCoordinator
+from .devices import get_driver_for_device
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
+
+# Capability contract for this platform: only devices with a controllable
+# lamp get a light entity.
+_REQUIRED_CAPABILITIES = frozenset({"light"})
 
 
 async def async_setup_entry(
@@ -27,7 +32,8 @@ async def async_setup_entry(
     async_add_entities(
         RokiHoodLight(coordinator, device)
         for device in coordinator.devices
-        if str(device.get("dc", "")).upper() in ("", "RYYJ")
+        if _REQUIRED_CAPABILITIES
+        <= get_driver_for_device(coordinator, device).capabilities
     )
 
 

@@ -3,13 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory
 
 from ..coordinator import RokiCoordinator
+
+# The capability contract every driver speaks.  A platform asks a driver what
+# it can do and only generates entities for the matching capabilities; nothing
+# filters on a device's category code any more.
+Capability = Literal["power", "level", "light", "timing"]
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    """Declarative description of one command an appliance accepts.
+
+    kind="property" writes the on/off payload through the cloud property API;
+    kind="invoke" calls a vendor function identified by function and passes
+    param/params.  verified records whether the command has been confirmed on
+    real hardware: a spec stays in commands() once declared, but an unverified
+    one must not be wired to a user-facing control yet.
+    """
+
+    kind: Literal["property", "invoke"]
+    on: dict[str, Any] | None = None
+    off: dict[str, Any] | None = None
+    function: str | None = None
+    param: str | None = None
+    params: dict[str, Any] | None = None
+    verified: bool = True
 
 
 @dataclass
@@ -45,7 +70,6 @@ class RokiDeviceDriver:
 
     category_code: str = ""
     category_name: str = "Device"
-    is_controllable: bool = False
 
     def __init__(self, coordinator: RokiCoordinator, device: dict[str, Any]) -> None:
         self.coordinator = coordinator
@@ -73,6 +97,24 @@ class RokiDeviceDriver:
             return int(val)
         except (TypeError, ValueError):
             return default
+
+    def commands(self) -> dict[str, CommandSpec]:
+        """Commands this appliance accepts, keyed by capability name.
+
+        An instance method on purpose: one driver class serves devices on both
+        cloud transports, and what a single device can do depends on the
+        device, not just on its category (see HoodDriver).
+        """
+        return {}
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        """What this device can do, derived from commands().
+
+        Derived rather than declared so the two can never disagree: the command
+        table is the single source of truth for platform gating.
+        """
+        return frozenset(self.commands())
 
     def sensors(self) -> list[SensorSpec]:
         """Return sensor specifications for this device category."""

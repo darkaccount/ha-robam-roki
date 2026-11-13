@@ -24,9 +24,15 @@ from .const import (
     resolve_levels,
 )
 from .coordinator import RokiCoordinator
+from .devices import get_driver_for_device
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
+
+# Capability contract for this platform: a fan entity needs both a power
+# switch and a gear ladder.  Telemetry-only drivers expose neither, so they
+# never reach this platform -- the gate is the driver, not the category code.
+_REQUIRED_CAPABILITIES = frozenset({"power", "level"})
 
 
 async def async_setup_entry(
@@ -38,7 +44,8 @@ async def async_setup_entry(
     async_add_entities(
         RokiHoodFan(coordinator, device, entry.options.get(CONF_MAX_LEVEL))
         for device in coordinator.devices
-        if str(device.get("dc", "")).upper() in ("", "RYYJ")
+        if _REQUIRED_CAPABILITIES
+        <= get_driver_for_device(coordinator, device).capabilities
     )
 
 

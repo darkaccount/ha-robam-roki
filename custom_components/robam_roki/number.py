@@ -14,9 +14,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import RokiAuthError, RokiError
 from .const import MAX_COUNTDOWN_MINUTES
 from .coordinator import RokiCoordinator
+from .devices import get_driver_for_device
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
+
+# Capability contract for this platform: only devices with an armed
+# countdown get the number entity.
+_REQUIRED_CAPABILITIES = frozenset({"timing"})
 
 # The countdown range.  The protocol carries FanTime as a single unsigned
 # byte, so 255 is the hard ceiling.  The app's hour+minute picker tops out at
@@ -41,7 +46,8 @@ async def async_setup_entry(
     async_add_entities(
         RokiHoodCountdown(coordinator, device)
         for device in coordinator.devices
-        if str(device.get("dc", "")).upper() in ("", "RYYJ")
+        if _REQUIRED_CAPABILITIES
+        <= get_driver_for_device(coordinator, device).capabilities
     )
 
 

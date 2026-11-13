@@ -9,7 +9,7 @@ from homeassistant.const import EntityCategory
 
 from ..api import as_int
 from ..const import known_levels_for_model
-from .base import BinarySensorSpec, RokiDeviceDriver, SensorSpec
+from .base import BinarySensorSpec, CommandSpec, RokiDeviceDriver, SensorSpec
 
 FAULT_DESCRIPTIONS: dict[int, str] = {
     0: "正常",
@@ -38,11 +38,44 @@ class HoodDriver(RokiDeviceDriver):
 
     category_code = "RYYJ"
     category_name = "Range Hood"
-    is_controllable = True
 
     def __init__(self, coordinator: Any, device: dict[str, Any]) -> None:
         super().__init__(coordinator, device)
         self.model_levels = known_levels_for_model(self.dt)
+
+    def commands(self) -> dict[str, CommandSpec]:
+        """Commands the hood accepts, keyed by capability.
+
+        power/light write a status property, level invokes function 134 and
+        timing invokes function 144 (level + minutes) -- exactly the write
+        paths the coordinator already drives.
+        """
+        # TODO(P3): the REST/IoT countdown is not implemented -- the
+        # coordinator raises "Countdown is not supported for this device
+        # model" -- so a REST hood should advertise no timing capability.
+        # P0 keeps declaring it so the existing countdown number entity keeps
+        # being generated on both transports (zero behaviour change); the
+        # spec is marked unverified for REST until P3 gates the capability.
+        rest = bool(self.coordinator.is_rest_device(self.device_id))
+        return {
+            "power": CommandSpec(
+                kind="property",
+                on={"working_status": 1},
+                off={"working_status": 0},
+            ),
+            "level": CommandSpec(kind="invoke", function="134", param="level"),
+            "light": CommandSpec(
+                kind="property",
+                on={"light_status": 1},
+                off={"light_status": 0},
+            ),
+            "timing": CommandSpec(
+                kind="invoke",
+                function="144",
+                param="minutes",
+                verified=not rest,
+            ),
+        }
 
     def sensors(self) -> list[SensorSpec]:
         """Telemetry/diagnostic sensors for range hood."""
