@@ -20,29 +20,76 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN
+from .api import RokiApiError
+from .const import DOMAIN, LEARN_MAX_SECONDS
 from .devices import PYTHON_DRIVERS, get_driver_for_device
-from .draft import DraftResult, draft_from_properties
+from .draft import (
+    DraftResult,
+    controls_from_actions,
+    draft_from_properties,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_NAME = "draft_profile"
+LEARN_START_SERVICE = "learn_start"
+LEARN_STOP_SERVICE = "learn_stop"
 PROFILES_SUBDIR = "profiles"
 FIXTURES_SUBDIR = "fixtures"
 CONFIG_SUBDIR = "robam_roki"
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
-    """Register the draft_profile service exactly once."""
+    """Register the integration services exactly once."""
     if hass.services.has_service(DOMAIN, SERVICE_NAME):
         return
 
-    async def _handle(call: ServiceCall) -> None:
+    async def _handle_draft(call: ServiceCall) -> None:
         await _async_draft_profile(hass, call)
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_NAME, _handle, schema=_build_schema()
+    async def _handle_learn_start(call: ServiceCall) -> Any:
+        return await _async_learn_start(hass, call)
+
+    async def _handle_learn_stop(call: ServiceCall) -> Any:
+        return await _async_learn_stop(hass, call)
+
+    _register_service(
+        hass, SERVICE_NAME, _handle_draft, _build_schema()
     )
+    _register_service(
+        hass,
+        LEARN_START_SERVICE,
+        _handle_learn_start,
+        _build_learn_start_schema(),
+        response=True,
+    )
+    _register_service(
+        hass,
+        LEARN_STOP_SERVICE,
+        _handle_learn_stop,
+        _build_learn_stop_schema(),
+        response=True,
+    )
+
+
+def _register_service(
+    hass: HomeAssistant,
+    name: str,
+    handler: Any,
+    schema: Any | None,
+    *,
+    response: bool = False,
+) -> None:
+    """Register one service, opting into responses when HA supports it."""
+    kwargs: dict[str, Any] = {"schema": schema}
+    if response:
+        try:
+            from homeassistant.core import SupportsResponse
+        except ImportError:  # offline test harness without the enum
+            SupportsResponse = None  # type: ignore[assignment]
+        if SupportsResponse is not None:
+            kwargs["supports_response"] = SupportsResponse.OPTIONAL
+    hass.services.async_register(DOMAIN, name, handler, **kwargs)
 
 
 def _build_schema() -> Any | None:
@@ -61,6 +108,34 @@ def _build_schema() -> Any | None:
             vol.Optional("guid"): str,
             vol.Optional("write_fixture", default=True): bool,
         }
+    )
+
+
+def _build_learn_start_schema() -> Any | None:
+    """UI schema for learn_start; None when voluptuous is unavailable."""
+    try:
+        import voluptuous as vol
+    except ImportError:  # pragma: no cover - only the offline test env
+        return None
+    return vol.Schema(
+        {
+            vol.Optional("device_id"): str,
+            vol.Optional("guid"): str,
+            vol.Optional("duration", default=LEARN_MAX_SECONDS): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=LEARN_MAX_SECONDS)
+            ),
+        }
+    )
+
+
+def _build_learn_stop_schema() -> Any | None:
+    """UI schema for learn_stop; None when voluptuous is unavailable."""
+    try:
+        import voluptuous as vol
+    except ImportError:  # pragma: no cover - only the offline test env
+        return None
+    return vol.Schema(
+        {vol.Optional("device_id"): str, vol.Optional("guid"): str}
     )
 
 
@@ -241,6 +316,7 @@ def _notify_success(
     fixture_path: Path | None,
     result: DraftResult,
     builtin_driver: str | None = None,
+    learned: list[dict[str, Any]] | None = None,
 ) -> None:
     """Paths and the next step first, then the whole YAML as an appendix."""
     lines = [
@@ -259,6 +335,19 @@ def _notify_success(
         lines.append(
             "  继承：已继承内置驱动 python:"
             f"{builtin_driver}，草稿只补充驱动未覆盖的新键"
+        )
+    entries = controls_from_actions(learned or [])
+    if entries:
+        lines.append(
+            f"  学习结果：{len(learned or [])} 组动作 → "
+            f"{len(entries)} 条 controls（verified: false，先在实验开关下验证）"
+        )
+    else:
+        lines.append(
+            "  提示：没有学习到的动作，controls 仍是注释模板；"
+            "可先 learn_start/learn_stop 学习，或用 "
+            "python tools/roki_cli.py collect --device <guid> --mark <标签> "
+            "再 draft <bundle>。"
         )
     for warning in result.warnings:
         lines.append(f"  警告：{warning}")
@@ -287,6 +376,52 @@ def _notify_failure(hass: HomeAssistant, reason: str) -> None:
     )
 
 
+async def _async_learn_start(
+    hass: HomeAssistant, call: ServiceCall
+) -> dict[str, Any]:
+    """Begin a passive learning session for one device."""
+    data = dict(call.data)
+    selected = _select_device(hass, data.get("device_id"), data.get("guid"))
+    raw_duration = data.get("duration", LEARN_MAX_SECONDS)
+    try:
+        duration = int(raw_duration)
+    except (TypeError, ValueError) as err:
+        raise ServiceValidationError(
+            "duration must be an integer number of seconds"
+        ) from err
+    if duration < 1:
+        raise ServiceValidationError("duration must be at least 1 second")
+    duration = min(LEARN_MAX_SECONDS, duration)
+    try:
+        return selected.coordinator.learn_start(selected.guid, duration)
+    except RokiApiError as err:
+        raise ServiceValidationError(str(err)) from err
+
+
+async def _async_learn_stop(
+    hass: HomeAssistant, call: ServiceCall
+) -> dict[str, Any]:
+    """Stop the running session and return the recorded actions."""
+    data = dict(call.data)
+    device_id = data.get("device_id")
+    guid = data.get("guid")
+    if device_id or guid:
+        selected = _select_device(hass, device_id, guid)
+        try:
+            return await selected.coordinator.learn_stop(selected.guid)
+        except RokiApiError as err:
+            raise ServiceValidationError(str(err)) from err
+    coordinators = _coordinators(hass)
+    if not coordinators:
+        raise ServiceValidationError(
+            "no loaded ROBAM ROKI config entry; set the integration up first"
+        )
+    for coordinator in coordinators:
+        if coordinator.learn_active():
+            return await coordinator.learn_stop()
+    return {"device_id": None, "actions": []}
+
+
 async def _async_draft_profile(hass: HomeAssistant, call: ServiceCall) -> None:
     data = dict(call.data)
     selected = _select_device(
@@ -299,6 +434,11 @@ async def _async_draft_profile(hass: HomeAssistant, call: ServiceCall) -> None:
     driver = _build_driver(coordinator, selected.device)
     builtin_driver, builtin_keys = _builtin_driver(driver)
 
+    learned: list[dict[str, Any]] = []
+    learned_fn = getattr(coordinator, "learned_controls", None)
+    if callable(learned_fn):
+        learned = list(learned_fn(selected.guid) or [])
+
     def expect_fn(properties: dict[str, Any]) -> dict[str, Any]:
         # Read-only: only the coordinator cache and the driver's own logic.
         return _expect_values(driver, properties)
@@ -309,6 +449,7 @@ async def _async_draft_profile(hass: HomeAssistant, call: ServiceCall) -> None:
         expect_fn=expect_fn,
         builtin_driver=builtin_driver,
         builtin_keys=builtin_keys,
+        learned_controls=learned,
     )
     if not result.profile_yaml:
         raise ServiceValidationError(
@@ -334,5 +475,5 @@ async def _async_draft_profile(hass: HomeAssistant, call: ServiceCall) -> None:
     profile_path = Path(profile_path_text)
     fixture_path = Path(fixture_path_text) if fixture_path_text else None
     _notify_success(
-        hass, profile_path, fixture_path, result, builtin_driver
+        hass, profile_path, fixture_path, result, builtin_driver, learned
     )

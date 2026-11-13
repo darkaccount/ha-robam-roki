@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
@@ -16,6 +18,12 @@ from ..coordinator import RokiCoordinator
 # filters on a device's category code any more.
 Capability = Literal["power", "level", "light", "timing"]
 
+#: The largest raw MQTT payload a declarative command may carry.
+MAX_MQTT_BODY_BYTES = 64
+
+#: body_hex must be an even-length run of hex digits (empty allowed).
+_HEX_BODY = re.compile(r"(?:[0-9a-fA-F]{2})*")
+
 
 @dataclass(frozen=True)
 class CommandSpec:
@@ -23,18 +31,40 @@ class CommandSpec:
 
     kind="property" writes the on/off payload through the cloud property API;
     kind="invoke" calls a vendor function identified by function and passes
-    param/params.  verified records whether the command has been confirmed on
-    real hardware: a spec stays in commands() once declared, but an unverified
-    one must not be wired to a user-facing control yet.
+    param/params; kind="mqtt" sends one raw frame (command + body_hex).
+    verified records whether the command has been confirmed on real hardware:
+    a spec stays in commands() once declared, but an unverified one is hidden
+    from the platforms unless the allow_unverified_controls option is on.
     """
 
-    kind: Literal["property", "invoke"]
+    kind: Literal["property", "invoke", "mqtt"]
     on: dict[str, Any] | None = None
     off: dict[str, Any] | None = None
     function: str | None = None
     param: str | None = None
     params: dict[str, Any] | None = None
+    command: int | None = None
+    body_hex: str | None = None
     verified: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate the raw-frame fields at construction time."""
+        if self.kind == "mqtt":
+            if self.command is None:
+                raise ValueError("mqtt commands need a command number")
+            if self.body_hex is None:
+                raise ValueError("mqtt commands need a body_hex payload")
+        if self.body_hex is not None:
+            body = str(self.body_hex).strip()
+            if not _HEX_BODY.fullmatch(body):
+                raise ValueError(
+                    f"body_hex must be an even-length hex string: "
+                    f"{self.body_hex!r}"
+                )
+            if len(body) // 2 > MAX_MQTT_BODY_BYTES:
+                raise ValueError(
+                    f"body_hex must be at most {MAX_MQTT_BODY_BYTES} bytes"
+                )
 
 
 @dataclass
@@ -118,6 +148,20 @@ class RokiDeviceDriver:
         """
         return frozenset(self.commands())
 
+    def available_capabilities(
+        self, *, allow_unverified: bool = False
+    ) -> frozenset[str]:
+        """Capabilities a platform may expose right now.
+
+        An unverified command stays declared in commands() but is hidden from
+        the UI unless the user explicitly enables experimental controls.
+        """
+        if allow_unverified:
+            return self.capabilities
+        return frozenset(
+            name for name, spec in self.commands().items() if spec.verified
+        )
+
     def sensors(self) -> list[SensorSpec]:
         """Return sensor specifications for this device category."""
         return []
@@ -125,3 +169,35 @@ class RokiDeviceDriver:
     def binary_sensors(self) -> list[BinarySensorSpec]:
         """Return binary sensor specifications for this device category."""
         return []
+
+
+def allowed_capabilities(
+    driver: RokiDeviceDriver, coordinator: Any
+) -> frozenset[str]:
+    """Capabilities a platform may generate, honouring the unverified gate.
+
+    The coordinator owns the option (it knows the config entry); test doubles
+    that predate it simply expose the driver's verified capabilities.
+    """
+    allow = getattr(coordinator, "allow_unverified_controls", None)
+    allowed = bool(allow()) if callable(allow) else False
+    available = getattr(driver, "available_capabilities", None)
+    if not callable(available):
+        return frozenset(driver.capabilities)
+    return available(allow_unverified=allowed)
+
+
+def experimental_attributes(
+    driver: Any, capabilities: Iterable[str]
+) -> dict[str, Any]:
+    """Mark an entity as experimental when one of its commands is unverified."""
+    commands = getattr(driver, "commands", None)
+    if not callable(commands):
+        return {}
+    specs = commands()
+    if any(
+        name in specs and not specs[name].verified
+        for name in capabilities
+    ):
+        return {"experimental": True}
+    return {}

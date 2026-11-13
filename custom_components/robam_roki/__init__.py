@@ -164,6 +164,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: RokiConfigEntry) -> bool
 
     coordinator.profiles = await hass.async_add_executor_job(_load_profiles, hass)
 
+    # Surface fixable profile problems and the experimental-controls warning
+    # as repair issues.  A failure here must never stop the setup.
+    try:
+        from . import repairs
+
+        await repairs.async_refresh_issues(
+            hass,
+            coordinator,
+            user_dir=Path(hass.config.path(*_USER_PROFILES_PATH)),
+        )
+    except Exception as err:  # noqa: BLE001 - repairs are advisory
+        _LOGGER.debug("repairs: could not refresh issues: %s", err)
+
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_start_push()
 

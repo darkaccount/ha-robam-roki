@@ -177,6 +177,48 @@
           "description": "Also save a regression fixture for the draft (default on)."
         }
       }
+    },
+    "learn_start": {
+      "name": "Start learning a device",
+      "description": "Passively record the commands the official App sends to this device for up to ten minutes. No command is sent to the appliance.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Device to learn (mutually exclusive with guid)."
+        },
+        "guid": {
+          "name": "Device GUID",
+          "description": "Target a device by GUID (mutually exclusive with device_id)."
+        },
+        "duration": {
+          "name": "Duration (seconds)",
+          "description": "Default 600, at most 600."
+        }
+      }
+    },
+    "learn_stop": {
+      "name": "Stop learning",
+      "description": "Finish the current learning session and return the recorded actions and observed property changes.",
+      "fields": {
+        "device_id": {
+          "name": "Device (optional)",
+          "description": "Check that the session belongs to this device."
+        }
+      }
+    }
+  },
+  "issues": {
+    "profile_parse_failed": {
+      "title": "Profile cannot be parsed",
+      "description": "The file {path} could not be loaded: {error}\n\nThis issue disappears automatically once the file is fixed."
+    },
+    "profile_conflict": {
+      "title": "Profile match conflict",
+      "description": "The device {device} (dc={dc}) is matched equally well by several profiles: {profiles}.\n\nMake one match more specific (for example add dt) or remove the extra files."
+    },
+    "unverified_controls_enabled": {
+      "title": "Unverified controls are allowed",
+      "description": "The allow-unverified-controls option is on: unverified commands from learning mode or a hand-written profile become real entities and may act unexpectedly on the appliance.\n\nCheck each one against the official App, then set verified to true in the profile and turn this option off."
     }
   },
   "options": {
@@ -188,7 +230,8 @@
           "max_level": "Level count for unknown models (2-6)",
           "scan_interval": "Polling interval (seconds)",
           "enable_sse": "Enable real-time push (SSE/MQTT)",
-          "countdown_auto_off": "Turn the hood off when the countdown ends (the appliance itself only beeps)"
+          "countdown_auto_off": "Turn the hood off when the countdown ends (the appliance itself only beeps)",
+          "allow_unverified_controls": "Allow unverified controls (experimental)"
         }
       }
     }

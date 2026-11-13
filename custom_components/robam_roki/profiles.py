@@ -99,14 +99,28 @@ BINARY_SENSOR_FIELDS = frozenset(
     {"keys", "on_values", "name", "icon", "device_class", "entity_category"}
 )
 CONTROL_FIELDS = frozenset(
-    {"kind", "on", "off", "function", "param", "params", "verified"}
+    {
+        "kind",
+        "on",
+        "off",
+        "function",
+        "param",
+        "params",
+        "command",
+        "body_hex",
+        "verified",
+    }
 )
+
+#: Mirrors devices.base.MAX_MQTT_BODY_BYTES; kept local to avoid importing the
+#: devices package from here (it imports this module).
+MAX_CONTROL_BODY_BYTES = 64
 
 #: The only entity categories a profile may ask for.
 ENTITY_CATEGORIES = frozenset({"diagnostic", "config"})
 
 #: The CommandSpec kinds a control entry may declare.
-CONTROL_KINDS = frozenset({"property", "invoke"})
+CONTROL_KINDS = frozenset({"property", "invoke", "mqtt"})
 
 #: Value converters a sensor/control entry may name in its type field.
 TYPE_CONVERTERS: dict[str, Callable[[Any], Any]] = {
@@ -411,6 +425,53 @@ def _validate_control(key: str, entry: Any, path: Path) -> dict[str, Any] | None
             _warn("%s.function: string or integer expected, ignored", where)
 
     _apply_text(spec, data, "param", where, yaml_bools=True)
+
+    if kind == "mqtt":
+        command = data.get("command")
+        parsed_command: int | None = None
+        if isinstance(command, bool):
+            parsed_command = None
+        elif isinstance(command, int):
+            parsed_command = command
+        elif isinstance(command, str) and command.strip().isdigit():
+            parsed_command = int(command.strip())
+        if parsed_command is None or not 0 <= parsed_command <= 255:
+            _warn(
+                "%s.command: integer 0-255 expected, control skipped",
+                where,
+            )
+            return None
+        spec["command"] = parsed_command
+
+        body_hex = data.get("body_hex")
+        if not isinstance(body_hex, str):
+            _warn(
+                "%s.body_hex: hex string expected, control skipped",
+                where,
+            )
+            return None
+        cleaned_body = body_hex.strip()
+        if len(cleaned_body) % 2 or any(
+            char not in "0123456789abcdefABCDEF" for char in cleaned_body
+        ):
+            _warn(
+                "%s.body_hex: even-length hex expected, control skipped",
+                where,
+            )
+            return None
+        if len(cleaned_body) // 2 > MAX_CONTROL_BODY_BYTES:
+            _warn(
+                "%s.body_hex: at most %d bytes, control skipped",
+                where,
+                MAX_CONTROL_BODY_BYTES,
+            )
+            return None
+        spec["body_hex"] = cleaned_body.lower()
+    elif "command" in data or "body_hex" in data:
+        _warn(
+            "%s: command/body_hex only apply to kind=mqtt, ignored",
+            where,
+        )
 
     if "verified" in data:
         verified = data["verified"]

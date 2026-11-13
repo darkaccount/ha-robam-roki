@@ -14,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import RokiAuthError, RokiClient, RokiError
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_ALLOW_UNVERIFIED_CONTROLS,
     CONF_APP_GUID,
     CONF_COUNTDOWN_AUTO_OFF,
     CONF_DEVICE_TOKEN,
@@ -28,6 +29,7 @@ from .const import (
     CONF_TOKEN_EXPIRES_AT,
     CONF_TOKEN_TYPE,
     CONF_USER_ID,
+    DEFAULT_ALLOW_UNVERIFIED_CONTROLS,
     DEFAULT_COUNTDOWN_AUTO_OFF,
     DEFAULT_ENABLE_SSE,
     DEFAULT_LEVELS,
@@ -307,6 +309,15 @@ class RobamRokiOptionsFlow(OptionsFlow):
                         options.get(
                             CONF_COUNTDOWN_AUTO_OFF,
                             DEFAULT_COUNTDOWN_AUTO_OFF,
+                        )
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ALLOW_UNVERIFIED_CONTROLS,
+                    default=bool(
+                        options.get(
+                            CONF_ALLOW_UNVERIFIED_CONTROLS,
+                            DEFAULT_ALLOW_UNVERIFIED_CONTROLS,
                         )
                     ),
                 ): bool,

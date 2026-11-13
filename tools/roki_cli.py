@@ -1016,13 +1016,49 @@ def cmd_draft(client, args) -> int:
         print(f"{source} is not valid JSON: {err}", file=sys.stderr)
         return 2
 
+    learned: Any = None
+    learned_path = getattr(args, "learned", None)
+    if learned_path:
+        try:
+            learned_payload = json.loads(
+                Path(learned_path).read_text(encoding="utf-8")
+            )
+        except OSError as err:
+            print(f"cannot read {learned_path}: {err}", file=sys.stderr)
+            return 2
+        except json.JSONDecodeError as err:
+            print(
+                f"{learned_path} is not valid JSON: {err}", file=sys.stderr
+            )
+            return 2
+        if isinstance(learned_payload, dict):
+            learned = learned_payload.get("actions") or learned_payload.get(
+                "groups"
+            )
+        elif isinstance(learned_payload, list):
+            learned = learned_payload
+        if learned is None:
+            print(
+                "--learned must be a JSON list, or an object with an "
+                "actions/groups list",
+                file=sys.stderr,
+            )
+            return 2
+
     drafter = load_draft()
     if isinstance(payload, dict) and payload.get("schema") == drafter.BUNDLE_SCHEMA:
-        result = drafter.draft_from_bundle(payload)
+        result = drafter.draft_from_bundle(
+            payload, learned_controls=learned
+        )
     elif isinstance(payload, dict) and (
         "entry" in payload or "coordinator" in payload
     ):
-        result = drafter.draft_from_diagnostics(payload, dc=args.dc, dt=args.dt)
+        result = drafter.draft_from_diagnostics(
+            payload,
+            dc=args.dc,
+            dt=args.dt,
+            learned_controls=learned,
+        )
     else:
         print(
             "unrecognised input: expected a roki-bundle/1 capture or a "
@@ -1054,15 +1090,22 @@ def cmd_draft(client, args) -> int:
         payload.get("properties") if isinstance(payload, dict) else None,
         result.fixture.get("properties"),
     )
+    learned_entries = drafter.controls_from_actions(learned or [])
     print(f"profile : {profile_path}")
     print(f"fixture : {fixture_path}")
     print(f"privacy : {redacted} sensitive value(s) redacted")
+    if learned_entries:
+        print(
+            f"controls: {len(learned_entries)} learned action(s) "
+            "(verified: false)"
+        )
     if args.json:
         dump(
             {
                 "profile": str(profile_path),
                 "fixture": str(fixture_path),
                 "redacted_values": redacted,
+                "learned_actions": len(learned_entries),
                 "warnings": result.warnings,
             }
         )
@@ -1218,6 +1261,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_draft.add_argument("--out", default=".", help="output directory")
     p_draft.add_argument("--dc", help="pick the device by category code")
     p_draft.add_argument("--dt", help="pick the device by model code")
+    p_draft.add_argument(
+        "--learned",
+        metavar="JSON",
+        help=(
+            "JSON file with learned actions (the learn_stop result, a groups "
+            "list, or a flat action list); generates the controls section "
+            "with the same generator the HA service uses"
+        ),
+    )
     p_draft.add_argument("--json", action="store_true", help="machine readable output")
 
     return parser

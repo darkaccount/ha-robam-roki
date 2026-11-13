@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import RokiAuthError, RokiError
 from .coordinator import RokiCoordinator
 from .devices import get_driver_for_device
+from .devices.base import allowed_capabilities, experimental_attributes
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,7 +34,9 @@ async def async_setup_entry(
         RokiHoodLight(coordinator, device)
         for device in coordinator.devices
         if _REQUIRED_CAPABILITIES
-        <= get_driver_for_device(coordinator, device).capabilities
+        <= allowed_capabilities(
+            get_driver_for_device(coordinator, device), coordinator
+        )
     )
 
 
@@ -55,6 +58,12 @@ class RokiHoodLight(RokiEntity, LightEntity):
         if value is None:
             return None
         return self.prop_int("lightStatus", "light_status") == 1
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return experimental_attributes(
+            getattr(self, "driver", None), ("light",)
+        )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._async_set_light(True)

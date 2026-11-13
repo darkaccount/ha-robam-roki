@@ -177,6 +177,48 @@
           "description": "为回归测试保存同一份 fixture（默认开启）。"
         }
       }
+    },
+    "learn_start": {
+      "name": "开始学习新设备控制",
+      "description": "被动记录官方 App 发往该设备的命令，最多 10 分钟。学习期间不会向设备发送任何命令。",
+      "fields": {
+        "device_id": {
+          "name": "设备",
+          "description": "要学习的设备（与 guid 二选一）。"
+        },
+        "guid": {
+          "name": "设备 GUID",
+          "description": "直接指定设备 GUID（与 device_id 二选一）。"
+        },
+        "duration": {
+          "name": "学习时长（秒）",
+          "description": "默认 600，上限 600。"
+        }
+      }
+    },
+    "learn_stop": {
+      "name": "结束学习",
+      "description": "结束当前学习会话，并返回记录到的动作列表与观察到的属性变化。",
+      "fields": {
+        "device_id": {
+          "name": "设备（可选）",
+          "description": "校验会话是否属于该设备。"
+        }
+      }
+    }
+  },
+  "issues": {
+    "profile_parse_failed": {
+      "title": "profile 无法解析",
+      "description": "文件 {path} 无法加载：{error}\n\n修复该文件后，此提示会自动消失。"
+    },
+    "profile_conflict": {
+      "title": "profile 匹配冲突",
+      "description": "设备 {device}（dc={dc}）同时被多个 profile 等权匹配：{profiles}。\n\n请让其中一个 match 更具体（例如补上 dt），或删除多余的文件。"
+    },
+    "unverified_controls_enabled": {
+      "title": "已允许未验证的控制",
+      "description": "选项「允许未验证的控制」已开启：来自学习模式或手写的未验证命令会以实体形式出现，可能在真机上产生非预期动作。\n\n请逐个对照官方 App 验证；验证完成后把 profile 里的 verified 改为 true，并关闭此选项。"
     }
   },
   "options": {
@@ -188,7 +230,8 @@
           "max_level": "未知型号的档位数量（2-6）",
           "scan_interval": "轮询间隔（秒）",
           "enable_sse": "启用实时推送（SSE/MQTT）",
-          "countdown_auto_off": "倒计时结束后自动关机（设备本身只会蜂鸣提醒）"
+          "countdown_auto_off": "倒计时结束后自动关机（设备本身只会蜂鸣提醒）",
+          "allow_unverified_controls": "允许未验证的控制（实验性）"
         }
       }
     }

@@ -305,7 +305,12 @@ def test_matcher_covers_every_platform(name: str, required: set[str]) -> None:
 def test_only_capable_devices_get_entities(name: str) -> None:
     coordinator = _FakeCoordinator(FLEET)
     entities = _setup(PLATFORMS[name], coordinator)
-    assert {entity._device_id for entity in entities} == HOOD_GUIDS
+    expected = set(HOOD_GUIDS)
+    if name == "number":
+        # The countdown is unverified on REST hoods, so it is hidden until the
+        # experimental-controls option is enabled.
+        expected.discard(REST_HOOD["guid"])
+    assert {entity._device_id for entity in entities} == expected
 
 
 @pytest.mark.parametrize("name", sorted(PLATFORMS))
@@ -365,7 +370,27 @@ def test_each_hood_gets_one_entity_per_platform(device: dict[str, Any]) -> None:
         name: len(_setup(platform, coordinator))
         for name, platform in PLATFORMS.items()
     }
-    assert counts == {"fan": 1, "light": 1, "number": 1, "select": 1}
+    expected_number = 0 if device is REST_HOOD else 1
+    assert counts == {
+        "fan": 1,
+        "light": 1,
+        "number": expected_number,
+        "select": 1,
+    }
+
+
+class _OptInCoordinator(_FakeCoordinator):
+    """A coordinator whose user enabled the experimental controls option."""
+
+    def allow_unverified_controls(self) -> bool:
+        return True
+
+
+def test_unverified_controls_can_be_opted_into() -> None:
+    coordinator = _OptInCoordinator([REST_HOOD])
+    entities = _setup(number, coordinator)
+    assert len(entities) == 1
+    assert entities[0]._device_id == REST_HOOD["guid"]
 
 
 def test_setup_sends_no_commands() -> None:

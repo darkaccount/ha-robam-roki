@@ -81,6 +81,9 @@ def _spec(**kwargs: Any) -> Any:
         function=kwargs.pop("function", None),
         param=kwargs.pop("param", None),
         params=kwargs.pop("params", None),
+        command=kwargs.pop("command", None),
+        body_hex=kwargs.pop("body_hex", None),
+        verified=kwargs.pop("verified", True),
     )
 
 
@@ -111,11 +114,26 @@ def test_invoke_commands_merge_the_static_params() -> None:
 
 def test_mqtt_commands_send_one_raw_frame() -> None:
     transport = _RecordingTransport()
-    spec = _spec(kind="mqtt", function="140")
-    spec.command = 140
-    spec.body = b"xy"
+    spec = _spec(kind="mqtt", command=140, body_hex="7879")
     asyncio.run(commands.execute(spec, transport))
     assert transport.calls == [("frame", 140, b"xy")]
+
+
+def test_unverified_commands_are_refused_by_default() -> None:
+    transport = _RecordingTransport()
+    spec = _spec(kind="property", on={"working_status": 1}, verified=False)
+    with pytest.raises(commands.UnverifiedCommandError):
+        asyncio.run(commands.execute(spec, transport, on=True))
+    assert transport.calls == []
+
+
+def test_unverified_commands_run_when_the_option_is_on() -> None:
+    transport = _RecordingTransport()
+    spec = _spec(kind="property", on={"working_status": 1}, verified=False)
+    asyncio.run(
+        commands.execute(spec, transport, allow_unverified=True, on=True)
+    )
+    assert transport.calls == [("property", "working_status", 1)]
 
 
 def test_bad_commands_raise_value_errors() -> None:
@@ -355,6 +373,60 @@ def test_rest_level_uses_the_invoke_api() -> None:
     assert coordinator.client.rest_calls == [
         ("invoke", REST_GUID, "134", {"level": 3})
     ]
+
+
+# -- raw MQTT frames (kind=mqtt) ----------------------------------------
+
+
+def test_raw_frame_layout_is_source_command_terminal_uid_body() -> None:
+    coordinator = _make_coordinator(MQTT_DEVICE)
+    transport = coordinator_module._DeviceTransport(coordinator, MQTT_GUID)
+    asyncio.run(transport.async_send_frame(140, b"\x01\x02"))
+    expected = (
+        APP_GUID.encode("ascii")          # 17-byte source (app) guid
+        + bytes([140])                    # command
+        + bytes([mqtt.TERMINAL_TYPE_APP])  # terminal type
+        + USER_ID.encode("utf-8").ljust(10, b"\x00")  # 10-byte user id
+        + b"\x01\x02"                    # declarative body
+    )
+    assert _frames(coordinator) == [expected]
+
+
+def test_raw_frames_are_refused_on_rest_devices() -> None:
+    coordinator = _make_coordinator(REST_DEVICE)
+    transport = coordinator_module._DeviceTransport(
+        coordinator, REST_DEVICE["guid"]
+    )
+    with pytest.raises(RokiApiError):
+        asyncio.run(transport.async_send_frame(140, b""))
+
+
+def test_the_coordinator_also_refuses_unverified_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _spec(
+        kind="property",
+        on={"working_status": 1},
+        off={"working_status": 0},
+        verified=False,
+    )
+
+    class _Driver:
+        def commands(self) -> dict[str, Any]:
+            return {"power": spec}
+
+    devices_module = importlib.import_module(f"{PACKAGE}.devices")
+    monkeypatch.setattr(
+        devices_module, "get_driver_for_device", lambda *_: _Driver()
+    )
+    coordinator = _make_coordinator(MQTT_DEVICE)
+    with pytest.raises(RokiApiError):
+        asyncio.run(coordinator.async_execute(MQTT_GUID, "power", on=True))
+    assert _frames(coordinator) == []
+
+    monkeypatch.setattr(coordinator, "allow_unverified_controls", lambda: True)
+    asyncio.run(coordinator.async_execute(MQTT_GUID, "power", on=True))
+    assert len(_frames(coordinator)) == 2
 
 
 # -- capability gating ---------------------------------------------------

@@ -39,6 +39,18 @@ MAX_COUNTDOWN_MINUTES = 240
 CONF_COUNTDOWN_AUTO_OFF = "countdown_auto_off"
 DEFAULT_COUNTDOWN_AUTO_OFF = True
 
+# Unverified (experimental) controls are hidden from the platforms and refused
+# by the executor unless the user explicitly opts in.
+CONF_ALLOW_UNVERIFIED_CONTROLS = "allow_unverified_controls"
+DEFAULT_ALLOW_UNVERIFIED_CONTROLS = False
+
+# Learning mode (P3-C): passively record the official App's commands for up
+# to ten minutes, split them into action groups and diff the property snapshots.
+LEARN_MAX_SECONDS = 600
+LEARN_GAP_SECONDS = 2.5
+LEARN_MAX_ACTIONS = 50
+LEARN_MAX_BODY_BYTES = 64
+
 # The countdown entity redraws itself on this interval while a timer runs, so
 # the display walks down even when no poll comes in.
 COUNTDOWN_TICK_SECONDS = 15

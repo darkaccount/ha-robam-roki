@@ -102,6 +102,27 @@ def _install_ha_stubs() -> None:
     sys.modules["homeassistant.helpers"] = helpers
 
 
+def _ensure_notifications() -> None:
+    """Re-register our recorder if another test module replaced the stub."""
+    components = sys.modules["homeassistant.components"]
+    notifications = sys.modules.get(
+        "homeassistant.components.persistent_notification"
+    )
+    if notifications is None:
+        notifications = _module(
+            "homeassistant.components.persistent_notification"
+        )
+    sys.modules[
+        "homeassistant.components.persistent_notification"
+    ] = notifications
+
+    def async_create(hass, message, title=None, notification_id=None):
+        NOTIFICATIONS.append({"message": message, "title": title})
+
+    notifications.async_create = async_create
+    components.persistent_notification = notifications
+
+
 def _stub_coordinator() -> None:
     module = _module(f"{PACKAGE}.coordinator")
 
@@ -146,8 +167,14 @@ class _FakeServices:
     def has_service(self, domain: str, name: str) -> bool:
         return (domain, name) in self.registered
 
-    def async_register(self, domain, name, handler, schema=None) -> None:
-        self.registered[(domain, name)] = {"handler": handler, "schema": schema}
+    def async_register(
+        self, domain, name, handler, schema=None, **kwargs: Any
+    ) -> None:
+        self.registered[(domain, name)] = {
+            "handler": handler,
+            "schema": schema,
+            **kwargs,
+        }
 
 
 class _FakeRegistry:
@@ -198,6 +225,35 @@ class _FakeCoordinator:
         self.data = data if data is not None else {GUID: dict(PROPERTIES)}
         self.profiles: list[Any] = []
         self.command_calls: list[str] = []
+        self.learn_calls: list[tuple[Any, ...]] = []
+        self.learning = False
+        self.learned: list[dict[str, Any]] = []
+
+    def learn_active(self) -> bool:
+        return self.learning
+
+    def learned_controls(self, device_id: str) -> list[dict[str, Any]]:
+        return list(self.learned)
+
+    def learn_start(self, device_id: str, duration: int) -> dict[str, Any]:
+        self.learn_calls.append(("start", device_id, duration))
+        self.learning = True
+        return {
+            "device_id": device_id,
+            "expires_at": "2026-01-01T00:10:00+00:00",
+        }
+
+    async def learn_stop(
+        self, device_id: str | None = None
+    ) -> dict[str, Any]:
+        self.learn_calls.append(("stop", device_id))
+        self.learning = False
+        return {
+            "device_id": device_id or GUID,
+            "actions": [
+                {"index": 1, "command": 132, "body_hex": "01", "observed": {}}
+            ],
+        }
 
     @property
     def device_ids(self) -> list[str]:
@@ -231,6 +287,7 @@ class _Call:
 
 
 def _call(hass: _FakeHass, data: dict[str, Any]) -> None:
+    _ensure_notifications()
     asyncio.run(services.async_setup_services(hass))
     handler = hass.services.registered[(DOMAIN, "draft_profile")]["handler"]
     asyncio.run(handler(_Call(data)))
@@ -246,11 +303,81 @@ def _clear_notifications() -> Any:
 # -- registration and validation ----------------------------------------
 
 
+def _call_service(hass: _FakeHass, name: str, data: dict[str, Any]) -> Any:
+    _ensure_notifications()
+    asyncio.run(services.async_setup_services(hass))
+    handler = hass.services.registered[(DOMAIN, name)]["handler"]
+    return asyncio.run(handler(_Call(data)))
+
+
 def test_service_registers_only_once(tmp_path: Path) -> None:
     hass = _FakeHass(tmp_path, [_FakeCoordinator()])
     asyncio.run(services.async_setup_services(hass))
     asyncio.run(services.async_setup_services(hass))
-    assert list(hass.services.registered) == [(DOMAIN, "draft_profile")]
+    assert set(hass.services.registered) == {
+        (DOMAIN, "draft_profile"),
+        (DOMAIN, "learn_start"),
+        (DOMAIN, "learn_stop"),
+    }
+
+
+# -- learning services ---------------------------------------------------
+
+
+def test_learn_start_resolves_the_device_and_clamps_duration(
+    tmp_path: Path,
+) -> None:
+    coordinator = _FakeCoordinator()
+    hass = _FakeHass(tmp_path, [coordinator])
+    result = _call_service(
+        hass, "learn_start", {"guid": GUID, "duration": 9999}
+    )
+    assert result["device_id"] == GUID
+    assert coordinator.learn_calls == [("start", GUID, 600)]
+
+
+def test_learn_start_defaults_to_ten_minutes(tmp_path: Path) -> None:
+    coordinator = _FakeCoordinator()
+    hass = _FakeHass(tmp_path, [coordinator])
+    _call_service(hass, "learn_start", {"guid": GUID})
+    assert coordinator.learn_calls == [("start", GUID, 600)]
+
+
+def test_learn_start_rejects_a_bad_duration(tmp_path: Path) -> None:
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    with pytest.raises(ServiceValidationError):
+        _call_service(hass, "learn_start", {"guid": GUID, "duration": 0})
+    with pytest.raises(ServiceValidationError):
+        _call_service(hass, "learn_start", {"guid": GUID, "duration": "soon"})
+
+
+def test_learn_stop_without_a_session_is_a_no_op(tmp_path: Path) -> None:
+    coordinator = _FakeCoordinator()
+    hass = _FakeHass(tmp_path, [coordinator])
+    result = _call_service(hass, "learn_stop", {})
+    assert result == {"device_id": None, "actions": []}
+    assert coordinator.learn_calls == []
+
+
+def test_learn_stop_ends_the_active_session(tmp_path: Path) -> None:
+    coordinator = _FakeCoordinator()
+    coordinator.learning = True
+    hass = _FakeHass(tmp_path, [coordinator])
+    result = _call_service(hass, "learn_stop", {})
+    assert result["actions"][0]["command"] == 132
+    assert coordinator.learn_calls == [("stop", None)]
+
+
+def test_learn_stop_validates_a_given_device(tmp_path: Path) -> None:
+    coordinator = _FakeCoordinator()
+    coordinator.learning = True
+    entry = types.SimpleNamespace(identifiers={(DOMAIN, GUID)})
+    hass = _FakeHass(
+        tmp_path, [coordinator], registry_entries={"dev-learn": entry}
+    )
+    result = _call_service(hass, "learn_stop", {"device_id": "dev-learn"})
+    assert result["device_id"] == GUID
+    assert coordinator.learn_calls == [("stop", GUID)]
 
 
 def test_exactly_one_of_device_id_or_guid(tmp_path: Path) -> None:
@@ -383,6 +510,47 @@ def test_service_inherits_the_builtin_driver(tmp_path: Path) -> None:
     assert "workStatus" not in (document.get("sensors") or {})
     assert "level" in document["sensors"]
     assert "已继承内置驱动 python:hood" in NOTIFICATIONS[0]["message"]
+
+
+def test_draft_profile_writes_the_learned_controls(tmp_path: Path) -> None:
+    coordinator = _FakeCoordinator()
+    coordinator.learned = [
+        {
+            "frames": [{"command": 132, "body_hex": "01"}],
+            "observed": {"workStatus": {"from": 0, "to": 1}},
+        }
+    ]
+    hass = _FakeHass(tmp_path, [coordinator])
+    _call(hass, {"guid": GUID})
+
+    document = yaml.safe_load(
+        _profile_path(tmp_path).read_text(encoding="utf-8")
+    )
+    assert document["controls"]["action_1"] == {
+        "kind": "mqtt",
+        "command": 132,
+        "body_hex": "01",
+        "verified": False,
+    }
+    message = NOTIFICATIONS[0]["message"]
+    assert "学习结果" in message
+    assert "1 条 controls" in message
+
+
+def test_draft_profile_hints_the_cli_fallback_without_learning(
+    tmp_path: Path,
+) -> None:
+    coordinator = _FakeCoordinator()  # no learned actions
+    hass = _FakeHass(tmp_path, [coordinator])
+    _call(hass, {"guid": GUID})
+
+    message = NOTIFICATIONS[0]["message"]
+    assert "没有学习到的动作" in message
+    assert "roki_cli.py collect" in message
+    document = yaml.safe_load(
+        _profile_path(tmp_path).read_text(encoding="utf-8")
+    )
+    assert "controls" not in document
 
 
 def test_service_sends_no_commands(tmp_path: Path) -> None:

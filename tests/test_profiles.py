@@ -875,6 +875,98 @@ def test_boolean_control_name_is_normalised(tmp_path: Path) -> None:
     assert list(profile.controls) == ["off"]
 
 
+# -- mqtt controls (P3-B) ------------------------------------------------
+
+
+def test_mqtt_control_carries_command_and_body(tmp_path: Path) -> None:
+    text = """
+    schema: roki-profile/1
+    match:
+      dc: RZQL
+    controls:
+      lamp:
+        kind: mqtt
+        command: 140
+        body_hex: "0A0B"
+        verified: false
+    """
+    profile = _load(tmp_path, text)
+    assert profile is not None
+    assert profile.controls["lamp"] == {
+        "kind": "mqtt",
+        "command": 140,
+        "body_hex": "0a0b",
+        "verified": False,
+    }
+
+
+def test_mqtt_control_accepts_a_numeric_command_string(tmp_path: Path) -> None:
+    text = """
+    schema: roki-profile/1
+    match:
+      dc: RZQL
+    controls:
+      lamp:
+        kind: mqtt
+        command: "141"
+        body_hex: ""
+    """
+    profile = _load(tmp_path, text)
+    assert profile is not None
+    assert profile.controls["lamp"]["command"] == 141
+    assert profile.controls["lamp"]["body_hex"] == ""
+
+
+def test_mqtt_controls_missing_or_broken_fields_are_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    too_long = "00" * 65
+    text = f"""
+    schema: roki-profile/1
+    match:
+      dc: RZQL
+    controls:
+      no_command:
+        kind: mqtt
+        body_hex: "01"
+      no_body:
+        kind: mqtt
+        command: 140
+      bad_hex:
+        kind: mqtt
+        command: 140
+        body_hex: "zz"
+      odd_hex:
+        kind: mqtt
+        command: 140
+        body_hex: "abc"
+      too_long:
+        kind: mqtt
+        command: 140
+        body_hex: "{too_long}"
+      bad_command:
+        kind: mqtt
+        command: 999
+        body_hex: "01"
+      non_mqtt_extra:
+        kind: property
+        on: {{working_status: 1}}
+        command: 140
+    """
+    with caplog.at_level(logging.WARNING):
+        profile = _load(tmp_path, text)
+    assert profile is not None
+    assert list(profile.controls) == ["non_mqtt_extra"]
+    assert profile.controls["non_mqtt_extra"] == {
+        "kind": "property",
+        "on": {"working_status": 1},
+    }
+    warnings = "\n".join(record.getMessage() for record in caplog.records)
+    assert ".command:" in warnings
+    assert ".body_hex:" in warnings
+    assert "command/body_hex only apply to kind=mqtt" in warnings
+
+
 # -- the module itself ---------------------------------------------------
 
 

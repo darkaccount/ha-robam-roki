@@ -25,9 +25,11 @@ from .api import (
     as_int,
     normalize_properties,
 )
+from .commands import UnverifiedCommandError
 from .commands import execute as execute_command
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_ALLOW_UNVERIFIED_CONTROLS,
     CONF_APP_GUID,
     CONF_COUNTDOWN_AUTO_OFF,
     CONF_TOKEN_EXPIRES_AT,
@@ -35,9 +37,14 @@ from .const import (
     COUNTDOWN_COMMAND_GRACE_SECONDS,
     COUNTDOWN_EMPTY_GRACE_SECONDS,
     COUNTDOWN_TOLERANCE_MINUTES,
+    DEFAULT_ALLOW_UNVERIFIED_CONTROLS,
     DEFAULT_COUNTDOWN_AUTO_OFF,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    LEARN_GAP_SECONDS,
+    LEARN_MAX_ACTIONS,
+    LEARN_MAX_BODY_BYTES,
+    LEARN_MAX_SECONDS,
     MAX_COUNTDOWN_MINUTES,
     OFFLINE_AFTER_POLLS,
 )
@@ -47,6 +54,8 @@ from .mqtt import (
     CMD_FAN_POLL,
     CMD_FAN_STATUS,
     CMD_FAN_TIME,
+    GUID_LENGTH,
+    TERMINAL_TYPE_APP,
     RokiMqttClient,
     RokiMqttError,
     decode_fan_message,
@@ -140,9 +149,38 @@ class _DeviceTransport:
         raise RokiApiError(f"Unsupported MQTT function: {function!r}")
 
     async def async_send_frame(self, command: int, body: bytes) -> None:
-        raise RokiApiError(
-            "Raw frame commands are not wired to a device yet"
+        coordinator = self._coordinator
+        if coordinator.is_rest_device(self._device_id):
+            raise RokiApiError(
+                "Raw MQTT frames are not supported by REST devices"
+            )
+        mqtt = getattr(coordinator, "_mqtt", None)
+        if mqtt is None:
+            raise RokiApiError("MQTT is not connected yet")
+        from .devices.base import MAX_MQTT_BODY_BYTES
+
+        if len(body) > MAX_MQTT_BODY_BYTES:
+            raise RokiApiError(
+                f"raw command body exceeds {MAX_MQTT_BODY_BYTES} bytes"
+            )
+        source = str(getattr(mqtt, "app_guid", ""))
+        if len(source) != GUID_LENGTH:
+            raise RokiApiError(
+                f"MQTT app guid must be {GUID_LENGTH} characters"
+            )
+        user_id = str(getattr(coordinator.client, "user_id", "") or "")
+        # Frame layout: 17-byte source guid, command byte, terminal type,
+        # 10-byte zero-padded user id, then the declarative body.
+        payload = (
+            source.encode("ascii")
+            + bytes([int(command) & 0xFF, TERMINAL_TYPE_APP])
+            + user_id.encode("utf-8")[:10].ljust(10, b"\x00")
+            + bytes(body)
         )
+        try:
+            await mqtt.async_publish(topic_for(self._device_id), payload)
+        except RokiMqttError as err:
+            raise RokiApiError(str(err)) from err
 
 
 # Command 144 carries the gear to run on, and the appliance applies it a
@@ -150,6 +188,28 @@ class _DeviceTransport:
 # timer's gear can land last and drag the fan back for a few seconds.  A
 # single idempotent 134 re-assert fixes the flicker without touching 144.
 COUNTDOWN_LEVEL_REASSERT_SECONDS = 2.5
+
+
+def _device_from_topic(topic: str) -> str | None:
+    """Recover the device guid from a MQTT topic (/u/R8229/000000000000)."""
+    parts = str(topic).split("/")
+    if len(parts) < 4:
+        return None
+    guid = parts[2] + parts[3]
+    return guid or None
+
+
+def _snapshot_diff(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """The property changes between two snapshots: key -> {from, to}."""
+    observed: dict[str, dict[str, Any]] = {}
+    for key in sorted(set(before) | set(after)):
+        old = before.get(key)
+        new = after.get(key)
+        if old != new:
+            observed[str(key)] = {"from": old, "to": new}
+    return observed
 
 
 @dataclass
@@ -212,6 +272,9 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._fallback_strikes: dict[str, int] = {}
         # First time each device reported an empty snapshot (available debounce).
         self._empty_since: dict[str, float] = {}
+        # Learning mode buffer; None when no session runs.  Memory only: a
+        # reload drops it, which is exactly what the workflow asks for.
+        self._learn: dict[str, Any] | None = None
 
     @property
     def device_ids(self) -> list[str]:
@@ -412,6 +475,17 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     # -- commands ---------------------------------------------------------
 
+    def allow_unverified_controls(self) -> bool:
+        """Whether experimental (unverified) controls may be shown and sent."""
+        entry = self.__dict__.get("entry")
+        options = getattr(entry, "options", None) or {}
+        return bool(
+            options.get(
+                CONF_ALLOW_UNVERIFIED_CONTROLS,
+                DEFAULT_ALLOW_UNVERIFIED_CONTROLS,
+            )
+        )
+
     async def async_execute(
         self, device_id: str, capability: str, **kwargs: Any
     ) -> None:
@@ -448,7 +522,15 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise RokiApiError(
                 f"{capability} is not supported by this device"
             )
-        await execute_command(spec, _DeviceTransport(self, device_id), **kwargs)
+        try:
+            await execute_command(
+                spec,
+                _DeviceTransport(self, device_id),
+                allow_unverified=self.allow_unverified_controls(),
+                **kwargs,
+            )
+        except UnverifiedCommandError as err:
+            raise RokiApiError(str(err)) from err
 
     async def async_set_power(self, device_id: str, on: bool) -> None:
         """Thin wrapper kept for callers that predate the executor."""
@@ -776,6 +858,240 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         properties = (self.__dict__.get("data") or {}).get(device_id) or {}
         return as_int(properties.get("timing"), 0) > 0
 
+    # -- learning mode (passive capture of the App's commands) ------------
+
+    def learn_active(self) -> bool:
+        return self.__dict__.get("_learn") is not None
+
+    def learn_start(
+        self, device_id: str, duration: int = LEARN_MAX_SECONDS
+    ) -> dict[str, Any]:
+        """Start passively recording the frames the official App sends."""
+        if self.learn_active():
+            raise RokiApiError(
+                "learning already running for another device"
+            )
+        seconds = max(1, min(LEARN_MAX_SECONDS, int(duration)))
+        properties = dict(
+            (self.__dict__.get("data") or {}).get(device_id) or {}
+        )
+        started = self._now()
+        state: dict[str, Any] = {
+            "guid": device_id,
+            "started_at": started,
+            "started_monotonic": time.monotonic(),
+            "deadline": started + timedelta(seconds=seconds),
+            "last_snapshot": properties,
+            "actions": [],
+            "groups_detail": [],
+            "group_start": 0,
+            "groups": 0,
+            "last_frame_at": None,
+            "cancel": None,
+        }
+        self._learn = state
+        self._state("_learned_groups").pop(device_id, None)
+        state["cancel"] = self.hass.async_call_later(
+            seconds, self._async_learn_timeout
+        )
+        name = self.device_info_for(device_id).get("name") or device_id
+        self._notify(
+            f"已开始学习 {name}（最长 {seconds} 秒）。"
+            "现在用官方 App 操作你要的功能；学习期间不会发送任何命令。",
+            title="ROBAM ROKI 学习模式",
+        )
+        return {
+            "device_id": device_id,
+            "expires_at": state["deadline"].isoformat(),
+        }
+
+    async def _async_learn_timeout(self, now: Any = None) -> None:
+        """The duration elapsed: stop the session through the shared path."""
+        if self.learn_active():
+            await self.learn_stop()
+
+    def _clear_learn_session(self) -> None:
+        """Drop the buffer and its timer (reload, unload, or stop)."""
+        state = self.__dict__.get("_learn")
+        self._learn = None
+        if state is None:
+            return
+        cancel = state.get("cancel")
+        if cancel is not None:
+            try:
+                cancel()
+            except Exception:
+                _LOGGER.debug(
+                    "cancelling the learning timer failed", exc_info=True
+                )
+
+    async def learn_stop(
+        self, device_id: str | None = None
+    ) -> dict[str, Any]:
+        """Finish the session, group the frames and return the actions."""
+        state = self.__dict__.get("_learn")
+        if state is None:
+            return {"device_id": None, "actions": []}
+        if device_id is not None and str(device_id) != str(state["guid"]):
+            raise RokiApiError("learning is running for a different device")
+        self._clear_learn_session()
+        self._close_learn_group(state)
+        self._state("_learned_groups")[str(state["guid"])] = list(
+            state["groups_detail"]
+        )
+        actions = [
+            {
+                "index": index + 1,
+                "command": action["command"],
+                "body_hex": action["body_hex"],
+                "observed": action["observed"],
+                "truncated": action["truncated"],
+            }
+            for index, action in enumerate(state["actions"])
+        ]
+        self._notify(
+            self._learn_result_text(str(state["guid"]), actions),
+            title="ROBAM ROKI 学习模式",
+        )
+        return {"device_id": state["guid"], "actions": actions}
+
+    def learned_controls(self, device_id: str) -> list[dict[str, Any]]:
+        """The last learning session's groups, grouped for the drafter.
+
+        Memory only: a reload clears them, so the draft must be generated in
+        the same session that learned the actions.
+        """
+        groups = self._state("_learned_groups").get(device_id) or []
+        return [
+            {
+                "frames": [dict(frame) for frame in group.get("frames", [])],
+                "observed": dict(group.get("observed") or {}),
+            }
+            for group in groups
+        ]
+
+    def _record_learn_frame(self, topic: str, payload: bytes) -> None:
+        """Record one inbound frame if a session is watching this device.
+
+        The raw payload is inspected before decoding, because the whole point
+        is to capture commands this integration does not understand yet.
+        """
+        state = self.__dict__.get("_learn")
+        if state is None or len(payload) < 18:
+            return
+        device_id = _device_from_topic(topic)
+        if device_id is None or device_id != str(state["guid"]):
+            return
+        try:
+            source = payload[:17].decode("ascii")
+        except UnicodeDecodeError:
+            return
+        if source == device_id:
+            return  # the appliance reporting its own state
+        client = self.__dict__.get("client")
+        if client is not None and source == str(
+            getattr(client, "app_guid", "") or ""
+        ):
+            return  # our own command (auto-off, an entity click)
+        now = time.monotonic()
+        last = state["last_frame_at"]
+        if last is None:
+            state["groups"] = 1
+        elif now - last > LEARN_GAP_SECONDS:
+            self._close_learn_group(state)
+            if state["groups"] >= LEARN_MAX_ACTIONS:
+                return
+            state["groups"] += 1
+        action_offset = int(
+            (now - state["started_monotonic"]) * 1000
+        )
+        body = payload[18:]
+        truncated = len(body) > LEARN_MAX_BODY_BYTES
+        state["actions"].append(
+            {
+                "offset_ms": action_offset,
+                "command": payload[17],
+                "body_hex": body[:LEARN_MAX_BODY_BYTES].hex(),
+                "truncated": truncated,
+                "observed": {},
+            }
+        )
+        state["last_frame_at"] = now
+
+    def _close_learn_group(self, state: dict[str, Any]) -> None:
+        """Attach the property diff observed at the end of the current group."""
+        actions = state["actions"]
+        start = state["group_start"]
+        if start >= len(actions):
+            return
+        snapshot = dict(
+            (self.__dict__.get("data") or {}).get(str(state["guid"])) or {}
+        )
+        observed = _snapshot_diff(state["last_snapshot"], snapshot)
+        state["last_snapshot"] = snapshot
+        group_actions = actions[start:]
+        for action in group_actions:
+            action["observed"] = observed
+        state["groups_detail"].append(
+            {
+                "frames": [
+                    {
+                        "command": action["command"],
+                        "body_hex": action["body_hex"],
+                    }
+                    for action in group_actions
+                ],
+                "observed": observed,
+            }
+        )
+        state["group_start"] = len(actions)
+
+    def _learn_result_text(
+        self, device_id: str, actions: list[dict[str, Any]]
+    ) -> str:
+        name = self.device_info_for(device_id).get("name") or device_id
+        if not actions:
+            return (
+                f"学习结束：{name} 没有记录到任何动作。\n"
+                "请确认官方 App 与 HA 登录的是同一个云端账号，"
+                "且操作确实发到了这台设备。\n"
+                "失败分支：python tools/roki_cli.py collect "
+                f"--device {device_id} --mark <标签>，然后 "
+                "python tools/roki_cli.py draft <bundle>。"
+            )
+        lines = [f"学习结束：{name} 共 {len(actions)} 个动作："]
+        for action in actions:
+            line = (
+                f"  #{action['index']} command={action['command']} "
+                f"body={action['body_hex']}"
+            )
+            if action["truncated"]:
+                line += "（body 已截断到 64 字节）"
+            observed = action.get("observed") or {}
+            if observed:
+                effects = ", ".join(
+                    f"{key} {change['from']}→{change['to']}"
+                    for key, change in observed.items()
+                )
+                line += f"（观察到 {effects}）"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _notify(self, message: str, *, title: str) -> None:
+        """Create a persistent notification without depending on HA at import."""
+        try:
+            from homeassistant.components import persistent_notification
+        except ImportError:  # offline test harness without the component
+            return
+        try:
+            persistent_notification.async_create(
+                self.hass, message, title=title
+            )
+        except Exception:
+            _LOGGER.debug(
+                "could not create a learning notification", exc_info=True
+            )
+
     async def _async_mqtt_command(
         self,
         device_id: str,
@@ -836,6 +1152,8 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         for pending in list(self._state("_level_reassert").values()):
             pending.cancel()
         self._state("_level_reassert").clear()
+        self._clear_learn_session()
+        self._state("_learned_groups").clear()
         for task in (self._sse_task, self._mqtt_task):
             if task is not None:
                 task.cancel()
@@ -964,6 +1282,7 @@ class RokiCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 _LOGGER.debug("Polling %s over MQTT failed: %s", guid, err)
 
     def _handle_mqtt_message(self, topic: str, payload: bytes) -> None:
+        self._record_learn_frame(topic, payload)
         decoded = decode_fan_message(payload)
         if decoded is None:
             return

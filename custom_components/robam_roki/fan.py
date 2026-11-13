@@ -25,6 +25,7 @@ from .const import (
 )
 from .coordinator import RokiCoordinator
 from .devices import get_driver_for_device
+from .devices.base import allowed_capabilities, experimental_attributes
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,7 +46,9 @@ async def async_setup_entry(
         RokiHoodFan(coordinator, device, entry.options.get(CONF_MAX_LEVEL))
         for device in coordinator.devices
         if _REQUIRED_CAPABILITIES
-        <= get_driver_for_device(coordinator, device).capabilities
+        <= allowed_capabilities(
+            get_driver_for_device(coordinator, device), coordinator
+        )
     )
 
 
@@ -270,7 +273,7 @@ class RokiHoodFan(RokiEntity, FanEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {
+        attributes = {
             "level": self.prop_int("level"),
             "levels": self.levels,
             "levels_source": self.levels_source,
@@ -279,3 +282,9 @@ class RokiHoodFan(RokiEntity, FanEntity):
             "fault_code": self.prop("faultCode", "fault_code"),
             "device_id": self._device_id,
         }
+        attributes.update(
+            experimental_attributes(
+                getattr(self, "driver", None), ("power", "level")
+            )
+        )
+        return attributes

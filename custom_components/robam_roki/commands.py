@@ -17,6 +17,10 @@ if TYPE_CHECKING:  # avoid the devices -> coordinator -> commands cycle
     from .devices.base import CommandSpec
 
 
+class UnverifiedCommandError(ValueError):
+    """An unverified CommandSpec was executed without the opt-in option."""
+
+
 @runtime_checkable
 class Transport(Protocol):
     """How one device accepts the three kinds of write."""
@@ -31,14 +35,29 @@ class Transport(Protocol):
         """Send one raw protocol frame (the MQTT transport)."""
 
 
-async def execute(spec: CommandSpec, transport: Transport, **kwargs: Any) -> None:
+async def execute(
+    spec: CommandSpec,
+    transport: Transport,
+    *,
+    allow_unverified: bool = False,
+    **kwargs: Any,
+) -> None:
     """Send one CommandSpec through the given transport.
 
     kind=property writes the on/off payload (the caller passes on=True/False);
     kind=invoke calls spec.function and fills spec.param from the keyword
     arguments plus spec.params; kind=mqtt sends one raw frame.  Unknown kinds
     are a programming error and raise ValueError.
+
+    An unverified spec is refused unless allow_unverified is set: that is the
+    second half of the platform gate, so an entity that predates the gate can
+    never quietly send an experimental command.
     """
+    if not spec.verified and not allow_unverified:
+        raise UnverifiedCommandError(
+            f"command {spec.kind!r} is not verified; "
+            "enable allow_unverified_controls to use it"
+        )
     if spec.kind == "property":
         if "on" not in kwargs:
             raise ValueError("property commands need an on/off keyword")
@@ -61,11 +80,10 @@ async def execute(spec: CommandSpec, transport: Transport, **kwargs: Any) -> Non
         return
 
     if spec.kind == "mqtt":
-        command = getattr(spec, "command", None) or spec.function
-        if command is None:
+        if spec.command is None:
             raise ValueError("mqtt commands need a command number")
-        body = getattr(spec, "body", b"") or b""
-        await transport.async_send_frame(int(command), bytes(body))
+        body = bytes.fromhex(str(spec.body_hex or ""))
+        await transport.async_send_frame(int(spec.command), body)
         return
 
     raise ValueError(f"unknown command kind {spec.kind!r}")

@@ -16,6 +16,7 @@ from .api import RokiAuthError, RokiError
 from .const import COUNTDOWN_TICK_SECONDS, MAX_COUNTDOWN_MINUTES
 from .coordinator import RokiCoordinator
 from .devices import get_driver_for_device
+from .devices.base import allowed_capabilities, experimental_attributes
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ async def async_setup_entry(
         RokiHoodCountdown(coordinator, device)
         for device in coordinator.devices
         if _REQUIRED_CAPABILITIES
-        <= get_driver_for_device(coordinator, device).capabilities
+        <= allowed_capabilities(
+            get_driver_for_device(coordinator, device), coordinator
+        )
     )
 
 
@@ -76,6 +79,12 @@ class RokiHoodCountdown(RokiEntity, NumberEntity):
         command would stop the fan instead of arming a timer.
         """
         return super().available and self.prop_int("level") > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return experimental_attributes(
+            getattr(self, "driver", None), ("timing",)
+        )
 
     @property
     def native_value(self) -> int | None:

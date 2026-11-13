@@ -27,6 +27,7 @@ from .const import (
 )
 from .coordinator import RokiCoordinator
 from .devices import get_driver_for_device
+from .devices.base import allowed_capabilities, experimental_attributes
 from .entity import RokiEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ async def async_setup_entry(
         RokiHoodGearSelect(coordinator, device)
         for device in coordinator.devices
         if _REQUIRED_CAPABILITIES
-        <= get_driver_for_device(coordinator, device).capabilities
+        <= allowed_capabilities(
+            get_driver_for_device(coordinator, device), coordinator
+        )
     )
 
 
@@ -118,6 +121,12 @@ class RokiHoodGearSelect(RokiEntity, SelectEntity):
         if level not in self.levels:
             return None
         return level_name(level, self.levels)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return experimental_attributes(
+            getattr(self, "driver", None), ("level", "power")
+        )
 
     # -- commands ---------------------------------------------------------
 
