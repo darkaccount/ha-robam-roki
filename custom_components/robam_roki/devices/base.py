@@ -43,6 +43,7 @@ class SensorSpec:
 
     key: str
     translation_key: str
+    name: str | None = None
     icon: str | None = None
     device_class: SensorDeviceClass | None = None
     state_class: SensorStateClass | None = None
@@ -58,6 +59,7 @@ class BinarySensorSpec:
 
     key: str
     translation_key: str
+    name: str | None = None
     icon: str | None = None
     device_class: BinarySensorDeviceClass | None = None
     entity_category: EntityCategory | None = None

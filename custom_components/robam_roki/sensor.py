@@ -44,7 +44,12 @@ class RokiDriverSensor(RokiEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, device)
         self.spec = spec
-        self._attr_translation_key = spec.translation_key
+        if spec.name:
+            # A profile-supplied name wins over the translation table; Home
+            # Assistant does not allow setting both, so only one is used.
+            self._attr_name = spec.name
+        else:
+            self._attr_translation_key = spec.translation_key
         self._attr_has_entity_name = True
         self._attr_unique_id = f"{self._device_id}_{spec.key}"
         if spec.icon:

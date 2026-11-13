@@ -1,0 +1,20 @@
+# Built-in example profile for the YAML profile mechanism.
+#
+# It inherits the Python thermal driver (extends: python:thermal) and only
+# renames one sensor that the driver already exposes.  No entity is added,
+# removed or re-valued, so this file proves the extends chain and the
+# presentation-override path without changing what the integration exposes.
+#
+# This directory belongs to the integration and is replaced on every update.
+# Put your own profiles in <Home Assistant config>/robam_roki/profiles/;
+# see PROFILES.md in the repository root for the full format.
+schema: roki-profile/1
+id: thermal-override
+extends: python:thermal
+match:
+  dc: RZQL
+sensors:
+  # No keys on purpose: presentation-only override.  The driver keeps its
+  # existing value function for this sensor.
+  top_temperature:
+    name: 上管温度
