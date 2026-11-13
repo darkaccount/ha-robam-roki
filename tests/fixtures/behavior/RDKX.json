@@ -1,0 +1,727 @@
+{
+  "schema": "roki-behavior/1",
+  "dc": "RDKX",
+  "note": "Golden behaviour baseline: the entities the pre-migration driver produced for these payloads. Regenerate only for a deliberate behaviour change (python tests/behavior_snapshot.py).",
+  "baseline": {
+    "captured_from": "python driver",
+    "driver": "OvenDriver",
+    "profile_id": null,
+    "python_base": null,
+    "builtin_profiles": [
+      "thermal-override.yaml"
+    ]
+  },
+  "cases": [
+    {
+      "id": "c98a_working",
+      "source": "tests/fixtures/devices/RZKY-98AD3.json (real capture, PR #3)",
+      "device": {
+        "dc": "RDKX",
+        "dt": "K1"
+      },
+      "properties": {
+        "workState": 2,
+        "powerState": 2,
+        "curTopTemp": 140,
+        "curButtomTemp": 96,
+        "curStageNum": 1,
+        "stageTotalNum": 0,
+        "stageOneSetTopTemp": 160,
+        "stageOneSetButtomTemp": 160,
+        "totalRemainSeonds": 1800,
+        "doorState": 0,
+        "faultCode": 0,
+        "lightSwitch": 1
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "预热中",
+          "attrs": {
+            "work_state": 2,
+            "power_state": 2,
+            "stage": 1,
+            "stages": 0,
+            "fault_code": 0
+          }
+        },
+        "current_temperature": {
+          "translation_key": "current_temperature",
+          "name": null,
+          "icon": "mdi:thermometer",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 140.0,
+          "attrs": {}
+        },
+        "top_temperature": {
+          "translation_key": "top_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 140.0,
+          "attrs": {}
+        },
+        "bottom_temperature": {
+          "translation_key": "bottom_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-down",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 96.0,
+          "attrs": {}
+        },
+        "target_temperature": {
+          "translation_key": "target_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": null,
+          "unit": "°C",
+          "entity_category": null,
+          "value": 160.0,
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 30,
+          "attrs": {}
+        },
+        "stage": {
+          "translation_key": "stage",
+          "name": null,
+          "icon": "mdi:tray-full",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "单段",
+          "attrs": {}
+        },
+        "estimated_power": {
+          "translation_key": "estimated_power",
+          "name": null,
+          "icon": "mdi:flash",
+          "device_class": "power",
+          "state_class": "measurement",
+          "unit": "W",
+          "entity_category": null,
+          "value": 2833,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": false,
+          "attrs": {}
+        },
+        "alarm": {
+          "translation_key": "alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "light": {
+          "translation_key": "light",
+          "name": null,
+          "icon": "mdi:lightbulb",
+          "device_class": null,
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "legacy_working",
+      "source": "tests/test_drivers.py::test_thermal_cooker_telemetry",
+      "device": {
+        "dc": "RDKX",
+        "dt": "K1"
+      },
+      "properties": {
+        "workStatus": 3,
+        "temp": 100,
+        "setTemp": 100,
+        "remainTime": 25,
+        "doorOpen": 0,
+        "alarm": 0
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "工作中",
+          "attrs": {
+            "work_state": 3,
+            "power_state": -1,
+            "stage": 0,
+            "stages": 0,
+            "fault_code": 0
+          }
+        },
+        "current_temperature": {
+          "translation_key": "current_temperature",
+          "name": null,
+          "icon": "mdi:thermometer",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 100.0,
+          "attrs": {}
+        },
+        "top_temperature": {
+          "translation_key": "top_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "bottom_temperature": {
+          "translation_key": "bottom_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-down",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "target_temperature": {
+          "translation_key": "target_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": null,
+          "unit": "°C",
+          "entity_category": null,
+          "value": 100.0,
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 25,
+          "attrs": {}
+        },
+        "stage": {
+          "translation_key": "stage",
+          "name": null,
+          "icon": "mdi:tray-full",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "单段",
+          "attrs": {}
+        },
+        "estimated_power": {
+          "translation_key": "estimated_power",
+          "name": null,
+          "icon": "mdi:flash",
+          "device_class": "power",
+          "state_class": "measurement",
+          "unit": "W",
+          "entity_category": null,
+          "value": 1300,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": false,
+          "attrs": {}
+        },
+        "alarm": {
+          "translation_key": "alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "light": {
+          "translation_key": "light",
+          "name": null,
+          "icon": "mdi:lightbulb",
+          "device_class": null,
+          "entity_category": "diagnostic",
+          "value": null,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "multi_stage",
+      "source": "a synthetic payload with a two-stage programme",
+      "device": {
+        "dc": "RDKX",
+        "dt": "K1"
+      },
+      "properties": {
+        "workState": 3,
+        "powerState": 2,
+        "curTopTemp": 175,
+        "curButtomTemp": 170,
+        "curStageNum": 2,
+        "stageTotalNum": 3,
+        "stageTwoSetTopTemp": 180,
+        "stageTwoSetButtomTemp": 175,
+        "remainTime": 40,
+        "doorState": 1,
+        "faultCode": 2,
+        "lightSwitch": 0
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "工作中",
+          "attrs": {
+            "work_state": 3,
+            "power_state": 2,
+            "stage": 2,
+            "stages": 3,
+            "fault_code": 2
+          }
+        },
+        "current_temperature": {
+          "translation_key": "current_temperature",
+          "name": null,
+          "icon": "mdi:thermometer",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 175.0,
+          "attrs": {}
+        },
+        "top_temperature": {
+          "translation_key": "top_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 175.0,
+          "attrs": {}
+        },
+        "bottom_temperature": {
+          "translation_key": "bottom_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-down",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 170.0,
+          "attrs": {}
+        },
+        "target_temperature": {
+          "translation_key": "target_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": null,
+          "unit": "°C",
+          "entity_category": null,
+          "value": 180.0,
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 40,
+          "attrs": {}
+        },
+        "stage": {
+          "translation_key": "stage",
+          "name": null,
+          "icon": "mdi:tray-full",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "2/3",
+          "attrs": {}
+        },
+        "estimated_power": {
+          "translation_key": "estimated_power",
+          "name": null,
+          "icon": "mdi:flash",
+          "device_class": "power",
+          "state_class": "measurement",
+          "unit": "W",
+          "entity_category": null,
+          "value": 1300,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": true,
+          "attrs": {}
+        },
+        "alarm": {
+          "translation_key": "alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        },
+        "light": {
+          "translation_key": "light",
+          "name": null,
+          "icon": "mdi:lightbulb",
+          "device_class": null,
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "unplugged",
+      "source": "tests/test_drivers.py::test_thermal_idle_is_not_always_off",
+      "device": {
+        "dc": "RDKX",
+        "dt": "K1"
+      },
+      "properties": {
+        "workState": 0,
+        "powerState": 0,
+        "curTopTemp": 30
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "关机",
+          "attrs": {
+            "work_state": 0,
+            "power_state": 0,
+            "stage": 0,
+            "stages": 0,
+            "fault_code": 0
+          }
+        },
+        "current_temperature": {
+          "translation_key": "current_temperature",
+          "name": null,
+          "icon": "mdi:thermometer",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 30.0,
+          "attrs": {}
+        },
+        "top_temperature": {
+          "translation_key": "top_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 30.0,
+          "attrs": {}
+        },
+        "bottom_temperature": {
+          "translation_key": "bottom_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-down",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "target_temperature": {
+          "translation_key": "target_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": null,
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "stage": {
+          "translation_key": "stage",
+          "name": null,
+          "icon": "mdi:tray-full",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "单段",
+          "attrs": {}
+        },
+        "estimated_power": {
+          "translation_key": "estimated_power",
+          "name": null,
+          "icon": "mdi:flash",
+          "device_class": "power",
+          "state_class": "measurement",
+          "unit": "W",
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "alarm": {
+          "translation_key": "alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": null,
+          "attrs": {}
+        },
+        "light": {
+          "translation_key": "light",
+          "name": null,
+          "icon": "mdi:lightbulb",
+          "device_class": null,
+          "entity_category": "diagnostic",
+          "value": null,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "cooling_down",
+      "source": "tests/test_drivers.py::test_thermal_idle_is_not_always_off",
+      "device": {
+        "dc": "RDKX",
+        "dt": "K1"
+      },
+      "properties": {
+        "workState": 0,
+        "powerState": 2,
+        "curTopTemp": 130
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "散热中",
+          "attrs": {
+            "work_state": 0,
+            "power_state": 2,
+            "stage": 0,
+            "stages": 0,
+            "fault_code": 0
+          }
+        },
+        "current_temperature": {
+          "translation_key": "current_temperature",
+          "name": null,
+          "icon": "mdi:thermometer",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 130.0,
+          "attrs": {}
+        },
+        "top_temperature": {
+          "translation_key": "top_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": 130.0,
+          "attrs": {}
+        },
+        "bottom_temperature": {
+          "translation_key": "bottom_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-down",
+          "device_class": "temperature",
+          "state_class": "measurement",
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "target_temperature": {
+          "translation_key": "target_temperature",
+          "name": null,
+          "icon": "mdi:thermometer-chevron-up",
+          "device_class": "temperature",
+          "state_class": null,
+          "unit": "°C",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "stage": {
+          "translation_key": "stage",
+          "name": null,
+          "icon": "mdi:tray-full",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "单段",
+          "attrs": {}
+        },
+        "estimated_power": {
+          "translation_key": "estimated_power",
+          "name": null,
+          "icon": "mdi:flash",
+          "device_class": "power",
+          "state_class": "measurement",
+          "unit": "W",
+          "entity_category": null,
+          "value": 30,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": null,
+          "attrs": {}
+        },
+        "alarm": {
+          "translation_key": "alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": null,
+          "attrs": {}
+        },
+        "light": {
+          "translation_key": "light",
+          "name": null,
+          "icon": "mdi:lightbulb",
+          "device_class": null,
+          "entity_category": "diagnostic",
+          "value": null,
+          "attrs": {}
+        }
+      }
+    }
+  ]
+}

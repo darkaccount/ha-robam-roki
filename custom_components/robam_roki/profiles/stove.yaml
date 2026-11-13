@@ -1,0 +1,72 @@
+# Built-in profile for ROBAM / ROKI gas and induction stoves (燃气灶 / 电磁灶).
+#
+# P3-F replaced the hand-written StoveDriver with this profile.  The entity set,
+# the entity keys and their order, the icons, the duration unit and the Chinese
+# status words are exactly the ones that driver produced: the behaviour is
+# pinned by tests/fixtures/behavior/RRQZ.json, captured from the driver before
+# the migration, and by tests/fixtures/devices/RRQZ.json.
+#
+# Profiles are read-only telemetry: this file never adds a control.  A stove
+# whose dc has no profile falls back to the generic raw_state sensor.
+#
+# This directory belongs to the integration and is replaced on every update;
+# put your own profiles in <Home Assistant config>/robam_roki/profiles/.
+schema: roki-profile/1
+id: stove
+name: 燃气灶
+match:
+  dc: RRQZ
+sensors:
+  left_head_level:
+    keys: [stoveHeadLeftPower, leftHeadLevel, ih1Level]
+    icon: mdi:fire
+  right_head_level:
+    keys: [stoveHeadRightPower, rightHeadLevel, ih2Level]
+    icon: mdi:fire
+  left_head_remaining_time:
+    keys: [stoveHeadLeftRemainingTime, leftHeadTime, ih1Time]
+    icon: mdi:timer-outline
+    device_class: duration
+    unit: min
+  right_head_remaining_time:
+    keys: [stoveHeadRightRemainingTime, rightHeadTime, ih2Time]
+    icon: mdi:timer-outline
+    device_class: duration
+    unit: min
+  # default 未知 on purpose.  The former driver returned 关火 when the status
+  # property was missing altogether, which asserts "the burner is off" on no
+  # evidence at all; an unrecognised status code already read 未知.  One honest
+  # fallback for both cases is safer on a cooking appliance.
+  left_head_status:
+    keys: [stoveHeadLeftWorkStatus, leftHeadStatus, ih1Status]
+    type: int
+    icon: mdi:stove
+    map:
+      0: 关火
+      1: 待机
+      2: 工作中
+      3: 定时中
+    default: 未知
+  right_head_status:
+    keys: [stoveHeadRightWorkStatus, rightHeadStatus, ih2Status]
+    type: int
+    icon: mdi:stove
+    map:
+      0: 关火
+      1: 待机
+      2: 工作中
+      3: 定时中
+    default: 未知
+binary_sensors:
+  # on_values instead of truthiness: the flags arrive as 0/1 numbers or as the
+  # strings "0"/"1" depending on the payload path, and bool("0") is True.
+  left_head_alarm:
+    keys: [stoveHeadLeftAlarmStatus, leftHeadAlarm]
+    on_values: [1, "1"]
+    device_class: problem
+    entity_category: diagnostic
+  right_head_alarm:
+    keys: [stoveHeadRightAlarmStatus, rightHeadAlarm]
+    on_values: [1, "1"]
+    device_class: problem
+    entity_category: diagnostic

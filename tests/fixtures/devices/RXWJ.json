@@ -1,0 +1,24 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "hand",
+  "note": "Synthetic payload written by hand for the P3-F profile migration; NOT a real device capture.",
+  "match": {
+    "dc": "RXWJ"
+  },
+  "properties": {
+    "workStatus": 5,
+    "remainTime": 0,
+    "workMode": "标准洗",
+    "doorOpen": 1,
+    "lackSalt": 0,
+    "lackRinse": 1
+  },
+  "expect": {
+    "work_status": "完成",
+    "remaining_time": 0,
+    "work_mode": "标准洗",
+    "door": true,
+    "lack_salt": false,
+    "lack_rinse": true
+  }
+}

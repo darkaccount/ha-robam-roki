@@ -180,6 +180,12 @@ class _FakeHass:
         self.services = _FakeServices()
         self.config_entries = _FakeConfigEntries(coordinators or [])
         self.device_registry = _FakeRegistry(registry_entries)
+        # Every blocking write must go through this hook, never the loop.
+        self.executor_calls: list[str] = []
+
+    async def async_add_executor_job(self, target: Any, *args: Any) -> Any:
+        self.executor_calls.append(getattr(target, "__name__", repr(target)))
+        return target(*args)
 
 
 class _FakeCoordinator:
@@ -356,6 +362,27 @@ def test_notification_puts_paths_before_the_full_text(tmp_path: Path) -> None:
     assert "controls 段为注释" in message
     # The next step tells the user how to activate the profile.
     assert "重新加载" in message
+
+
+def test_draft_files_are_written_in_the_executor(tmp_path: Path) -> None:
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    _call(hass, {"guid": GUID})
+    # The blocking mkdir/write_text work happens off the event loop.
+    assert hass.executor_calls.count("_write_draft") == 1
+
+
+def test_service_inherits_the_builtin_driver(tmp_path: Path) -> None:
+    hass = _FakeHass(tmp_path, [_FakeCoordinator()])
+    _call(hass, {"guid": GUID})
+
+    document = yaml.safe_load(
+        _profile_path(tmp_path).read_text(encoding="utf-8")
+    )
+    assert document["extends"] == "python:hood"
+    # workStatus is already exposed by HoodDriver, so no duplicate sensor.
+    assert "workStatus" not in (document.get("sensors") or {})
+    assert "level" in document["sensors"]
+    assert "已继承内置驱动 python:hood" in NOTIFICATIONS[0]["message"]
 
 
 def test_service_sends_no_commands(tmp_path: Path) -> None:

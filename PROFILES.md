@@ -226,3 +226,55 @@ sensors:
 - 不主动探测设备：取值只读 coordinator 已经缓存的属性。
 - `controls` 在 P1 只解析、校验，不会生效；等真机验证后才会进入 P2/P3。
 - 未知属性名不会报错，只是取不到值时按 `default`/`None` 处理。
+
+## 9. 自助接入（不用写代码）
+
+拿到 profile 的三条路径，按门槛从低到高：
+
+### 9.1 Home Assistant 服务（推荐）
+
+前提：集成已经添加并正常轮询。草稿只使用**已缓存**的属性，不会为了生成草稿请求云端，也不会向设备发命令。
+
+1. 开发者工具 → 操作 → 选择 `robam_roki.draft_profile`。
+2. `device_id` 与 `guid` 二选一（前者从设备注册表选设备，后者直接填 GUID）。
+3. 可选 `write_fixture`（默认开启，同时写回归 fixture）。
+4. 执行后查看持久通知：先给文件路径与下一步，最后附整份 YAML 全文。
+
+生成位置：
+
+| 文件 | 路径 |
+| :--- | :--- |
+| profile | `<配置目录>/robam_roki/profiles/draft-<dc>-<dt>.yaml` |
+| fixture | `<配置目录>/robam_roki/fixtures/<dc>-<dt>.json` |
+
+同名文件不会被覆盖：再次生成会追加 `-2`、`-3`。
+
+下一步：编辑草稿（把注释建议改成真实字段、按需把布尔属性移入 `binary_sensors`）→ 设置 → 设备与服务 → ROBAM ROKI → 重新加载 → 查看实体。
+
+### 9.2 命令行（可选）
+
+需要本机 Python 与依赖：
+
+~~~bash
+# 1) 采集：只发只读轮询 130，绝不发控制命令
+python tools/roki_cli.py collect --device <GUID> --mark
+#    --duration 默认 120s 被动采样；--mark 交互打点（回车结束）
+#    产物 bundle.json 的 properties/observations 已脱敏；
+#    帧体 hex 不含发送方 guid
+
+# 2) 生成草稿
+python tools/roki_cli.py draft bundle.json --out profiles/
+
+# 也可以直接吃 HA 诊断 JSON
+python tools/roki_cli.py draft diagnostics.json --dc RYYJ --dt R8229
+~~~
+
+### 9.3 Issue 反馈
+
+只有诊断 JSON 时也可以直接附到 GitHub Issue（`device_support.yml` 模板）。维护者会用 `draft` 生成 profile + fixture 并加入本仓库。
+
+### 9.4 隐私与安全
+
+- 服务与 CLI 都只读缓存 / 只发只读轮询，不发送任何控制命令。
+- 草稿与 fixture 的 properties 在写入前脱敏，重复脱敏幂等。
+- 生成的 `controls` 段全部是注释；当前版本不会生效。

@@ -12,3 +12,6 @@ secrets.yaml
 
 # pytest basetemp fallback (sandbox cannot write %TEMP%)
 pytest-of-*/
+
+# Local evidence (frames/logs) kept out of the repo
+tmp/

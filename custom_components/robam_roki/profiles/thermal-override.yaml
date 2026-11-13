@@ -1,9 +1,11 @@
-# Built-in example profile for the YAML profile mechanism.
+# Built-in category override for the RZQL cooking appliance family.
 #
 # It inherits the Python thermal driver (extends: python:thermal) and only
-# renames one sensor that the driver already exposes.  No entity is added,
-# removed or re-valued, so this file proves the extends chain and the
-# presentation-override path without changing what the integration exposes.
+# renames one sensor that the driver already exposes.  Nothing else is added,
+# removed or re-valued: the entity contract is pinned by
+# tests/fixtures/behavior/RZQL.json, which was captured with this profile in
+# place.  profiles/thermal-c98a.yaml is the matching *model* override (it adds
+# a dt to the match); this file stays the dc-wide one.
 #
 # This directory belongs to the integration and is replaced on every update.
 # Put your own profiles in <Home Assistant config>/robam_roki/profiles/;

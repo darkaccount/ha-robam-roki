@@ -1,0 +1,259 @@
+{
+  "schema": "roki-behavior/1",
+  "dc": "RJSQ",
+  "note": "Golden behaviour baseline: the entities the pre-migration driver produced for these payloads. Regenerate only for a deliberate behaviour change (python tests/behavior_snapshot.py).",
+  "baseline": {
+    "captured_from": "python driver",
+    "driver": "WaterPurifierDriver",
+    "profile_id": null,
+    "python_base": null,
+    "builtin_profiles": [
+      "thermal-override.yaml"
+    ]
+  },
+  "cases": [
+    {
+      "id": "water_purifier_telemetry",
+      "source": "tests/test_drivers.py::test_water_purifier_telemetry",
+      "device": {
+        "dc": "RJSQ"
+      },
+      "properties": {
+        "input_tds": 250,
+        "output_tds": 12,
+        "filter1": 95,
+        "filter2": 78,
+        "purifying": 1,
+        "leakAlarm": 0
+      },
+      "sensors": {
+        "input_tds": {
+          "translation_key": "input_tds",
+          "name": null,
+          "icon": "mdi:water-opacity",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 250,
+          "attrs": {}
+        },
+        "output_tds": {
+          "translation_key": "output_tds",
+          "name": null,
+          "icon": "mdi:water-check",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 12,
+          "attrs": {}
+        },
+        "filter_life_1": {
+          "translation_key": "filter_life_1",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 95,
+          "attrs": {}
+        },
+        "filter_life_2": {
+          "translation_key": "filter_life_2",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 78,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "purifying": {
+          "translation_key": "purifying",
+          "name": null,
+          "icon": null,
+          "device_class": "running",
+          "entity_category": null,
+          "value": true,
+          "attrs": {}
+        },
+        "leak_alarm": {
+          "translation_key": "leak_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "moisture",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "water_purifier_legacy_keys",
+      "source": "the inTds / currentTDSValue spelling the former driver also accepted",
+      "device": {
+        "dc": "RJSQ"
+      },
+      "properties": {
+        "inTds": 320,
+        "currentTDSValue": 18,
+        "filterLife1": 88,
+        "filterLife2": 64,
+        "workStatus": 1,
+        "leakAlarm": 1
+      },
+      "sensors": {
+        "input_tds": {
+          "translation_key": "input_tds",
+          "name": null,
+          "icon": "mdi:water-opacity",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 320,
+          "attrs": {}
+        },
+        "output_tds": {
+          "translation_key": "output_tds",
+          "name": null,
+          "icon": "mdi:water-check",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 18,
+          "attrs": {}
+        },
+        "filter_life_1": {
+          "translation_key": "filter_life_1",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 88,
+          "attrs": {}
+        },
+        "filter_life_2": {
+          "translation_key": "filter_life_2",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 64,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "purifying": {
+          "translation_key": "purifying",
+          "name": null,
+          "icon": null,
+          "device_class": "running",
+          "entity_category": null,
+          "value": true,
+          "attrs": {}
+        },
+        "leak_alarm": {
+          "translation_key": "leak_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "moisture",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "water_purifier_filters_exhausted",
+      "source": "a synthetic payload with both filters nearly used up",
+      "device": {
+        "dc": "RJSQ"
+      },
+      "properties": {
+        "input_tds": 300,
+        "output_tds": 20,
+        "filter1": 10,
+        "filter2": 5,
+        "purifying": 0,
+        "leakAlarm": 1
+      },
+      "sensors": {
+        "input_tds": {
+          "translation_key": "input_tds",
+          "name": null,
+          "icon": "mdi:water-opacity",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 300,
+          "attrs": {}
+        },
+        "output_tds": {
+          "translation_key": "output_tds",
+          "name": null,
+          "icon": "mdi:water-check",
+          "device_class": null,
+          "state_class": "measurement",
+          "unit": "ppm",
+          "entity_category": null,
+          "value": 20,
+          "attrs": {}
+        },
+        "filter_life_1": {
+          "translation_key": "filter_life_1",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 10,
+          "attrs": {}
+        },
+        "filter_life_2": {
+          "translation_key": "filter_life_2",
+          "name": null,
+          "icon": "mdi:filter-outline",
+          "device_class": null,
+          "state_class": null,
+          "unit": "%",
+          "entity_category": null,
+          "value": 5,
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "purifying": {
+          "translation_key": "purifying",
+          "name": null,
+          "icon": null,
+          "device_class": "running",
+          "entity_category": null,
+          "value": false,
+          "attrs": {}
+        },
+        "leak_alarm": {
+          "translation_key": "leak_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "moisture",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        }
+      }
+    }
+  ]
+}

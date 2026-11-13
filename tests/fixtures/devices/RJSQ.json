@@ -1,0 +1,24 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "hand",
+  "note": "Synthetic payload written by hand for the P3-F profile migration; NOT a real device capture.",
+  "match": {
+    "dc": "RJSQ"
+  },
+  "properties": {
+    "input_tds": 180,
+    "output_tds": 9,
+    "filter1": 60,
+    "filter2": 45,
+    "purifying": 1,
+    "leakAlarm": 0
+  },
+  "expect": {
+    "input_tds": 180,
+    "output_tds": 9,
+    "filter_life_1": 60,
+    "filter_life_2": 45,
+    "purifying": true,
+    "leak_alarm": false
+  }
+}

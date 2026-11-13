@@ -9,12 +9,22 @@ fight each other: whichever module ran first decided the shape of the
 This conftest lays down a single, permissive ``homeassistant`` package that
 every module extends.  The ``__path__`` entries are empty, so nothing here can
 ever shadow a real Home Assistant install.
+
+The Home Assistant enums that the driver layer stores on every entity spec
+(device_class / state_class / entity_category) are *not* permissive stubs:
+they are faithful ``StrEnum`` stand-ins with the member names and values Home
+Assistant uses.  A permissive stub made every value look valid, so a typo in a
+YAML profile was silently accepted, and the two ways of building an enum
+(``SensorDeviceClass.DURATION`` versus the profile layer's
+``SensorDeviceClass("duration")``) could not be compared at all -- which is
+exactly what the behaviour golden files in ``fixtures/behavior/`` are for.
 """
 
 from __future__ import annotations
 
 import sys
 import types
+from enum import StrEnum
 from typing import Any
 
 
@@ -37,6 +47,62 @@ class _Stub:
 
     def __ror__(self, other: Any) -> _Stub:
         return self
+
+
+# -- faithful Home Assistant enums ---------------------------------------
+#
+# These mirror the StrEnum classes Home Assistant ships.  Only the members this
+# integration (or a YAML profile in the built-in directory) can name are
+# declared: an unknown value has to fail here rather than silently pass.
+
+
+class BinarySensorDeviceClass(StrEnum):
+    """homeassistant.components.binary_sensor.BinarySensorDeviceClass."""
+
+    BATTERY = "battery"
+    CONNECTIVITY = "connectivity"
+    DOOR = "door"
+    MOISTURE = "moisture"
+    MOVING = "moving"
+    OCCUPANCY = "occupancy"
+    OPENING = "opening"
+    PLUG = "plug"
+    POWER = "power"
+    PROBLEM = "problem"
+    RUNNING = "running"
+    SAFETY = "safety"
+    SMOKE = "smoke"
+    WINDOW = "window"
+
+
+class SensorDeviceClass(StrEnum):
+    """homeassistant.components.sensor.SensorDeviceClass."""
+
+    BATTERY = "battery"
+    CURRENT = "current"
+    DURATION = "duration"
+    ENERGY = "energy"
+    HUMIDITY = "humidity"
+    POWER = "power"
+    SIGNAL_STRENGTH = "signal_strength"
+    TEMPERATURE = "temperature"
+    VOLTAGE = "voltage"
+    WATER = "water"
+
+
+class SensorStateClass(StrEnum):
+    """homeassistant.components.sensor.SensorStateClass."""
+
+    MEASUREMENT = "measurement"
+    TOTAL = "total"
+    TOTAL_INCREASING = "total_increasing"
+
+
+class EntityCategory(StrEnum):
+    """homeassistant.const.EntityCategory."""
+
+    CONFIG = "config"
+    DIAGNOSTIC = "diagnostic"
 
 
 def _ensure_package(name: str) -> types.ModuleType:
@@ -137,13 +203,13 @@ def install_ha_stubs() -> None:
     ha.components.diagnostics = diagnostics
 
     binary_sensor = _ensure_package("homeassistant.components.binary_sensor")
-    binary_sensor.BinarySensorDeviceClass = _Stub("BinarySensorDeviceClass")
+    binary_sensor.BinarySensorDeviceClass = BinarySensorDeviceClass
     binary_sensor.BinarySensorEntity = type("BinarySensorEntity", (), {})
     ha.components.binary_sensor = binary_sensor
 
     sensor = _ensure_package("homeassistant.components.sensor")
-    sensor.SensorDeviceClass = _Stub("SensorDeviceClass")
-    sensor.SensorStateClass = _Stub("SensorStateClass")
+    sensor.SensorDeviceClass = SensorDeviceClass
+    sensor.SensorStateClass = SensorStateClass
     sensor.SensorEntity = type("SensorEntity", (), {})
     ha.components.sensor = sensor
 
@@ -210,7 +276,7 @@ def install_ha_stubs() -> None:
 
     const = _ensure("homeassistant.const")
     const.Platform = _Stub("Platform")
-    const.EntityCategory = _Stub("EntityCategory")
+    const.EntityCategory = EntityCategory
 
     class UnitOfTime:
         MINUTES = "min"

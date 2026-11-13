@@ -169,8 +169,12 @@ class RokiHoodFan(RokiEntity, FanEntity):
         level = self._level_for_preset(preset_mode)
         try:
             if not self.is_on:
-                await self.coordinator.async_set_power(self._device_id, True)
-            await self.coordinator.async_set_level(self._device_id, level)
+                await self.coordinator.async_execute(
+                    self._device_id, "power", on=True
+                )
+            await self.coordinator.async_execute(
+                self._device_id, "level", level=level
+            )
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err
         except RokiError as err:
@@ -190,7 +194,9 @@ class RokiHoodFan(RokiEntity, FanEntity):
     ) -> None:
         try:
             if not self.is_on:
-                await self.coordinator.async_set_power(self._device_id, True)
+                await self.coordinator.async_execute(
+                    self._device_id, "power", on=True
+                )
                 self.coordinator.async_apply(self._device_id, {"workStatus": 1})
             if preset_mode is not None:
                 await self.async_set_preset_mode(preset_mode)
@@ -204,7 +210,9 @@ class RokiHoodFan(RokiEntity, FanEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         try:
-            await self.coordinator.async_set_power(self._device_id, False)
+            await self.coordinator.async_execute(
+                self._device_id, "power", on=False
+            )
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err
         except RokiError as err:
@@ -233,8 +241,12 @@ class RokiHoodFan(RokiEntity, FanEntity):
 
         try:
             if not self.is_on:
-                await self.coordinator.async_set_power(self._device_id, True)
-            await self.coordinator.async_set_level(self._device_id, level)
+                await self.coordinator.async_execute(
+                    self._device_id, "power", on=True
+                )
+            await self.coordinator.async_execute(
+                self._device_id, "level", level=level
+            )
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err
         except RokiError as err:

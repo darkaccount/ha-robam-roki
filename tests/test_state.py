@@ -13,6 +13,7 @@ import asyncio
 import importlib.util
 import sys
 import types
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,16 @@ def _install_ha_stubs() -> None:
     entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
     entity_platform.AddEntitiesCallback = _Stub("AddEntitiesCallback")
 
+    event = types.ModuleType("homeassistant.helpers.event")
+    event.intervals = []
+
+    def async_track_time_interval(hass, action, interval):
+        event.intervals.append((action, interval))
+        return lambda: None
+
+    event.async_track_time_interval = async_track_time_interval
+    helpers.event = event
+
     sys.modules.update(
         {
             "homeassistant": ha,
@@ -97,6 +108,7 @@ def _install_ha_stubs() -> None:
             "homeassistant.config_entries": config_entries,
             "homeassistant.helpers": helpers,
             "homeassistant.helpers.entity_platform": entity_platform,
+            "homeassistant.helpers.event": event,
         }
     )
 
@@ -143,6 +155,18 @@ def _stub_coordinator_and_entity() -> None:
             self.coordinator = coordinator
             self._device = device
             self._device_id = str(device["guid"])
+            self.hass = None
+            self.remove_callbacks: list[Any] = []
+            self.written = 0
+
+        async def async_added_to_hass(self) -> None:
+            pass
+
+        def async_on_remove(self, func: Any) -> None:
+            self.remove_callbacks.append(func)
+
+        def async_write_ha_state(self) -> None:
+            self.written += 1
 
         @property
         def properties(self) -> dict[str, Any]:
@@ -190,11 +214,32 @@ class _FakeCoordinator:
     def __init__(self) -> None:
         self.data: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, Any]] = []
+        self.restored = False
+
+    def countdown_remaining(self, device_id: str) -> int | None:
+        # No local deadline in these tests: read the device report instead.
+        return None
+
+    def countdown_active(self, device_id: str) -> bool:
+        return False
+
+    def restore_countdown(self, device_id: str) -> None:
+        self.restored = True
 
     async def async_set_timing(
         self, device_id: str, minutes: int, *, level: int | None = None
     ) -> None:
         self.calls.append(("timing", minutes, level))
+
+    async def async_execute(
+        self, device_id: str, capability: str, **kwargs: Any
+    ) -> None:
+        if capability == "timing":
+            await self.async_set_timing(
+                device_id, kwargs["minutes"], level=kwargs.get("level")
+            )
+        else:
+            raise AssertionError(f"unexpected capability {capability}")
 
     def async_apply(self, device_id: str, properties: dict[str, Any]) -> None:
         self.data.setdefault(device_id, {}).update(properties)
@@ -241,7 +286,7 @@ def test_countdown_is_available_while_the_hood_runs():
 
 def test_countdown_reads_the_reported_timing():
     entity = _make_countdown({"workStatus": 1, "level": 2, "timing": 30})
-    assert entity.native_value == 30.0
+    assert entity.native_value == 30
 
 
 def test_countdown_is_unknown_when_not_reported():
@@ -305,6 +350,70 @@ def test_roki_api_errors_are_wrapped_for_the_ui():
     with pytest.raises(Exception) as excinfo:
         asyncio.run(entity.async_set_native_value(10))
     assert "countdown" in str(excinfo.value).lower()
+
+
+# -- local deadline (the device only confirms) ---------------------------
+
+
+class _DeadlineCoordinator(_FakeCoordinator):
+    """Fake coordinator that already owns a local deadline."""
+
+    def __init__(self, remaining: int | None) -> None:
+        super().__init__()
+        self.remaining = remaining
+        self.active = remaining is not None
+
+    def countdown_remaining(self, device_id: str) -> int | None:
+        return self.remaining
+
+    def countdown_active(self, device_id: str) -> bool:
+        return self.active
+
+
+def test_countdown_prefers_the_local_deadline():
+    coordinator = _DeadlineCoordinator(7)
+    coordinator.data[DEVICE["guid"]] = {
+        "workStatus": 1,
+        "level": 2,
+        "timing": 30,
+    }
+    entity = number.RokiHoodCountdown(coordinator, dict(DEVICE))
+    assert entity.native_value == 7
+
+
+def test_countdown_reports_reported_fractions_as_integers():
+    # The real device occasionally reported 1.5 minutes.
+    entity = _make_countdown({"workStatus": 1, "level": 2, "timing": 1.5})
+    value = entity.native_value
+    assert isinstance(value, int)
+    assert value == 2
+
+
+def test_entity_restores_the_countdown_and_ticks_while_active():
+    event = sys.modules["homeassistant.helpers.event"]
+    event.intervals.clear()
+    coordinator = _DeadlineCoordinator(5)
+    coordinator.data[DEVICE["guid"]] = {
+        "workStatus": 1,
+        "level": 2,
+        "timing": 5,
+    }
+    entity = number.RokiHoodCountdown(coordinator, dict(DEVICE))
+    entity.hass = object()
+
+    asyncio.run(entity.async_added_to_hass())
+    assert coordinator.restored is True
+    assert [interval for _, interval in event.intervals] == [
+        timedelta(seconds=const.COUNTDOWN_TICK_SECONDS)
+    ]
+
+    tick, _interval = event.intervals[0]
+    asyncio.run(tick())  # a deadline is running, so the entity redraws itself
+    assert entity.written == 1
+    coordinator.active = False
+    coordinator.remaining = None
+    asyncio.run(tick())  # nothing to count down
+    assert entity.written == 1
 
 
 # -- the coordinator-side guard ------------------------------------------

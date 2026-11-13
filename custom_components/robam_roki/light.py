@@ -64,7 +64,9 @@ class RokiHoodLight(RokiEntity, LightEntity):
 
     async def _async_set_light(self, on: bool) -> None:
         try:
-            await self.coordinator.async_set_light(self._device_id, on)
+            await self.coordinator.async_execute(
+                self._device_id, "light", on=on
+            )
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err
         except RokiError as err:

@@ -1,0 +1,334 @@
+{
+  "schema": "roki-behavior/1",
+  "dc": "RRQZ",
+  "note": "Golden behaviour baseline: the entities the pre-migration driver produced for these payloads. Regenerate only for a deliberate behaviour change (python tests/behavior_snapshot.py).",
+  "baseline": {
+    "captured_from": "python driver",
+    "driver": "StoveDriver",
+    "profile_id": null,
+    "python_base": null,
+    "builtin_profiles": [
+      "thermal-override.yaml"
+    ]
+  },
+  "cases": [
+    {
+      "id": "stove_telemetry",
+      "source": "tests/test_drivers.py::test_stove_driver_telemetry",
+      "device": {
+        "dc": "RRQZ",
+        "dt": "9B39"
+      },
+      "properties": {
+        "stoveHeadLeftPower": 5,
+        "stoveHeadRightPower": 9,
+        "stoveHeadLeftRemainingTime": 15,
+        "stoveHeadRightRemainingTime": 0,
+        "stoveHeadLeftWorkStatus": 2,
+        "stoveHeadRightWorkStatus": 3,
+        "stoveHeadLeftAlarmStatus": 0,
+        "stoveHeadRightAlarmStatus": 1
+      },
+      "sensors": {
+        "left_head_level": {
+          "translation_key": "left_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 5,
+          "attrs": {}
+        },
+        "right_head_level": {
+          "translation_key": "right_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 9,
+          "attrs": {}
+        },
+        "left_head_remaining_time": {
+          "translation_key": "left_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 15,
+          "attrs": {}
+        },
+        "right_head_remaining_time": {
+          "translation_key": "right_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "left_head_status": {
+          "translation_key": "left_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "工作中",
+          "attrs": {}
+        },
+        "right_head_status": {
+          "translation_key": "right_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "定时中",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "left_head_alarm": {
+          "translation_key": "left_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "right_head_alarm": {
+          "translation_key": "right_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "stove_legacy_keys",
+      "source": "the legacy key spelling the former driver also accepted",
+      "device": {
+        "dc": "RRQZ",
+        "dt": "9B39"
+      },
+      "properties": {
+        "leftHeadLevel": 4,
+        "rightHeadLevel": 7,
+        "leftHeadTime": 20,
+        "rightHeadTime": 5,
+        "leftHeadStatus": 1,
+        "rightHeadStatus": 0,
+        "leftHeadAlarm": 0,
+        "rightHeadAlarm": 0
+      },
+      "sensors": {
+        "left_head_level": {
+          "translation_key": "left_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 4,
+          "attrs": {}
+        },
+        "right_head_level": {
+          "translation_key": "right_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 7,
+          "attrs": {}
+        },
+        "left_head_remaining_time": {
+          "translation_key": "left_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 20,
+          "attrs": {}
+        },
+        "right_head_remaining_time": {
+          "translation_key": "right_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 5,
+          "attrs": {}
+        },
+        "left_head_status": {
+          "translation_key": "left_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "待机",
+          "attrs": {}
+        },
+        "right_head_status": {
+          "translation_key": "right_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "关火",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "left_head_alarm": {
+          "translation_key": "left_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "right_head_alarm": {
+          "translation_key": "right_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "stove_unknown_status",
+      "source": "a status code outside the documented map",
+      "device": {
+        "dc": "RRQZ",
+        "dt": "9B39"
+      },
+      "properties": {
+        "stoveHeadLeftPower": 0,
+        "stoveHeadRightPower": 0,
+        "stoveHeadLeftRemainingTime": 0,
+        "stoveHeadRightRemainingTime": 0,
+        "stoveHeadLeftWorkStatus": 9,
+        "stoveHeadRightWorkStatus": 7,
+        "stoveHeadLeftAlarmStatus": 0,
+        "stoveHeadRightAlarmStatus": 0
+      },
+      "sensors": {
+        "left_head_level": {
+          "translation_key": "left_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "right_head_level": {
+          "translation_key": "right_head_level",
+          "name": null,
+          "icon": "mdi:fire",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "left_head_remaining_time": {
+          "translation_key": "left_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "right_head_remaining_time": {
+          "translation_key": "right_head_remaining_time",
+          "name": null,
+          "icon": "mdi:timer-outline",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "left_head_status": {
+          "translation_key": "left_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "未知",
+          "attrs": {}
+        },
+        "right_head_status": {
+          "translation_key": "right_head_status",
+          "name": null,
+          "icon": "mdi:stove",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "未知",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "left_head_alarm": {
+          "translation_key": "left_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "right_head_alarm": {
+          "translation_key": "right_head_alarm",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    }
+  ]
+}

@@ -15,6 +15,7 @@ from .api import RokiAuthError, RokiClient, RokiError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_APP_GUID,
+    CONF_COUNTDOWN_AUTO_OFF,
     CONF_DEVICE_TOKEN,
     CONF_DEVICES,
     CONF_ENABLE_SSE,
@@ -27,6 +28,7 @@ from .const import (
     CONF_TOKEN_EXPIRES_AT,
     CONF_TOKEN_TYPE,
     CONF_USER_ID,
+    DEFAULT_COUNTDOWN_AUTO_OFF,
     DEFAULT_ENABLE_SSE,
     DEFAULT_LEVELS,
     DEFAULT_MAX_LEVEL,
@@ -298,6 +300,15 @@ class RobamRokiOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_ENABLE_SSE,
                     default=bool(options.get(CONF_ENABLE_SSE, DEFAULT_ENABLE_SSE)),
+                ): bool,
+                vol.Optional(
+                    CONF_COUNTDOWN_AUTO_OFF,
+                    default=bool(
+                        options.get(
+                            CONF_COUNTDOWN_AUTO_OFF,
+                            DEFAULT_COUNTDOWN_AUTO_OFF,
+                        )
+                    ),
                 ): bool,
             }
         )

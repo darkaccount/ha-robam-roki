@@ -16,7 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,6 +73,14 @@ _HEADER: tuple[str, ...] = (
     "# Read-only: the sensors below only read coordinator properties, and no",
     "# command is ever sent.  Semantic hints are comments for you to review.",
 )
+
+#: Protocol bookkeeping keys that never describe the appliance state.
+PROTOCOL_METADATA_KEYS = frozenset(
+    {"lastupdatetime", "responsemessagetype", "msgid", "timestamp"}
+)
+
+#: Word level synonyms between the REST (camelCase) and older spellings.
+_ALIAS_WORDS = (("working", "work"),)
 
 
 @dataclass
@@ -132,28 +140,89 @@ def _infer_type(value: Any) -> str | None:
     return None
 
 
-def _sensor_lines(
-    properties: dict[str, Any], warnings: list[str]
-) -> list[str]:
-    """Render one sorted sensor entry per property, hints kept as comments."""
-    lines: list[str] = []
+def _canonical_key(key: Any) -> str:
+    """Collapse separators/case and known synonyms so aliases group together."""
+    text = re.sub(r"[^0-9a-z]", "", str(key).lower())
+    for source, target in _ALIAS_WORDS:
+        text = text.replace(source, target)
+    return text
+
+
+def _group_keys(properties: dict[str, Any]) -> list[tuple[str, list[str]]]:
+    """Group property spellings that describe the same field.
+
+    Returns [(canonical, [primary, *aliases])] sorted by the primary spelling.
+    camelCase wins as the primary key, then snake_case/kebab-case, so the
+    output order stays stable whatever order the payload used.
+    """
+    groups: dict[str, list[str]] = {}
     for key in sorted(properties, key=str):
-        value = properties[key]
-        rendered_key = _yaml_key(key)
-        lines.append(f"  {rendered_key}:")
-        lines.append(f"    keys: [{rendered_key}]")
+        groups.setdefault(_canonical_key(key), []).append(key)
+    grouped: list[tuple[str, list[str]]] = []
+    for canonical, keys in groups.items():
+        keys.sort(
+            key=lambda item: ("_" in str(item) or "-" in str(item), str(item))
+        )
+        grouped.append((canonical, keys))
+    grouped.sort(key=lambda item: str(item[1][0]))
+    return grouped
+
+
+def _first_value(properties: dict[str, Any], keys: list[str]) -> Any:
+    """The first non-null value among the alias spellings."""
+    for key in keys:
+        value = properties.get(key)
+        if value is not None:
+            return value
+    return properties.get(keys[0]) if keys else None
+
+
+def _split_properties(
+    properties: dict[str, Any], warnings: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop protocol metadata keys and report which ones were skipped."""
+    kept: dict[str, Any] = {}
+    skipped: list[str] = []
+    for key, value in properties.items():
+        if _canonical_key(key) in PROTOCOL_METADATA_KEYS:
+            skipped.append(str(key))
+            continue
+        kept[key] = value
+    skipped.sort()
+    if skipped:
+        warnings.append("skipped protocol metadata: " + ", ".join(skipped))
+    return kept, skipped
+
+
+def _sensor_lines(
+    properties: dict[str, Any],
+    warnings: list[str],
+    *,
+    covered: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Render one sorted sensor entry per property group, hints as comments."""
+    lines: list[str] = []
+    for canonical, keys in _group_keys(properties):
+        if canonical in covered:
+            # Already exposed by the built-in driver this draft extends.
+            continue
+        primary = keys[0]
+        value = _first_value(properties, keys)
+        rendered_keys = ", ".join(_yaml_key(key) for key in keys)
+        lines.append(f"  {_yaml_key(primary)}:")
+        lines.append(f"    keys: [{rendered_keys}]")
         type_name = _infer_type(value)
         if type_name is None:
             warnings.append(
-                f"property {key!r} is a {type(value).__name__}, not a scalar; "
-                "no type was suggested"
+                f"property {primary!r} is a {type(value).__name__}, not a "
+                "scalar; no type was suggested"
             )
         else:
             lines.append(f"    type: {type_name}")
 
         # Semantic hints are comments only -- the drafter never writes a
         # device_class/unit/map it cannot prove.
-        if _TEMPERATURE_KEY.search(str(key)):
+        if _TEMPERATURE_KEY.search(primary):
             lines.append("    # device_class: temperature")
             lines.append("    # unit: °C")
         if type_name == "int" and 0 <= int(value) <= 9:
@@ -164,7 +233,14 @@ def _sensor_lines(
 
 
 def _render_profile(
-    device: dict[str, Any], properties: dict[str, Any], source: str
+    device: dict[str, Any],
+    properties: dict[str, Any],
+    source: str,
+    *,
+    builtin_driver: str | None = None,
+    covered: frozenset[str] = frozenset(),
+    covered_property_keys: list[str] | None = None,
+    skipped_metadata: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     warnings: list[str] = []
     dc = _clean(device.get("dc"))
@@ -175,21 +251,63 @@ def _render_profile(
     lines.append(f"# source: {source}")
     if transport:
         lines.append(f"# transport: {transport}")
+    if builtin_driver:
+        lines.append(
+            f"# extends python:{builtin_driver}: keys that driver already "
+            "exposes were not drafted again"
+        )
+        if covered_property_keys:
+            lines.append(
+                "# covered and skipped: " + ", ".join(covered_property_keys)
+            )
+    if skipped_metadata:
+        lines.append(
+            "# skipped protocol metadata: " + ", ".join(skipped_metadata)
+        )
     lines.append(f"schema: {PROFILE_SCHEMA}")
+    if builtin_driver:
+        lines.append(f"extends: python:{builtin_driver}")
     lines.append("match:")
     lines.append(f"  dc: {_yaml_string(dc)}")
     if dt:
         lines.append(f"  dt: {_yaml_string(dt)}")
 
-    sensors = _sensor_lines(properties, warnings)
+    sensors = _sensor_lines(properties, warnings, covered=covered)
     if sensors:
         lines.append("sensors:")
         lines.extend(sensors)
+    elif properties:
+        lines.append(
+            "# sensors: every captured property is already covered by the "
+            "built-in driver."
+        )
     else:
         lines.append("# sensors: no properties were captured; add keys by hand.")
     lines.append("")
     lines.extend(CONTROL_TEMPLATE)
     return "\n".join(lines) + "\n", warnings
+
+
+def _builtin_coverage(driver_name: str) -> frozenset[str]:
+    """Keys a built-in Python driver already exposes (best effort).
+
+    The HA service passes the keys explicitly; this fallback only runs when a
+    caller knows the driver name and is inside the integration package.
+    """
+    try:
+        from .devices import PYTHON_DRIVERS
+    except ImportError:  # standalone CLI: no driver registry available
+        return frozenset()
+    driver_cls = PYTHON_DRIVERS.get(driver_name)
+    if driver_cls is None:
+        return frozenset()
+    try:
+        probe = driver_cls(None, {})
+        keys = {spec.key for spec in probe.sensors()}
+        keys |= {spec.key for spec in probe.binary_sensors()}
+    except Exception:  # noqa: BLE001 - coverage is only an optimisation
+        return frozenset()
+    return frozenset(_canonical_key(key) for key in keys)
 
 
 # -- fixture rendering ---------------------------------------------------
@@ -243,6 +361,8 @@ def _draft(
     *,
     source: str,
     expect_fn: ExpectFn | None,
+    builtin_driver: str | None = None,
+    builtin_keys: Iterable[str] | None = None,
 ) -> DraftResult:
     warnings: list[str] = []
     if not isinstance(device, dict):
@@ -263,8 +383,31 @@ def _draft(
         warnings.append(
             "no properties were captured; the draft only pins the match block"
         )
-    profile_yaml, render_warnings = _render_profile(device, properties, source)
+    sensor_properties, skipped_metadata = _split_properties(properties, warnings)
+    covered: set[str] = set()
+    if builtin_driver:
+        if builtin_keys is not None:
+            covered.update(_canonical_key(key) for key in builtin_keys)
+        if not covered:
+            covered.update(_builtin_coverage(builtin_driver))
+    covered_keys = frozenset(covered)
+    covered_property_keys = sorted(
+        str(key)
+        for key in sensor_properties
+        if _canonical_key(key) in covered_keys
+    )
+    profile_yaml, render_warnings = _render_profile(
+        device,
+        sensor_properties,
+        source,
+        builtin_driver=builtin_driver,
+        covered=covered_keys,
+        covered_property_keys=covered_property_keys,
+        skipped_metadata=skipped_metadata,
+    )
     warnings.extend(render_warnings)
+    # The fixture always keeps the full captured payload, including the keys
+    # the built-in driver already covers: it is the regression evidence.
     fixture = _build_fixture(
         device, properties, source=source, expect_fn=expect_fn, warnings=warnings
     )
@@ -279,9 +422,25 @@ def draft_from_properties(
     properties: dict[str, Any],
     *,
     expect_fn: ExpectFn | None = None,
+    builtin_driver: str | None = None,
+    builtin_keys: Iterable[str] | None = None,
 ) -> DraftResult:
-    """Draft a profile + fixture from one device and its cached properties."""
-    return _draft(device, properties, source="auto", expect_fn=expect_fn)
+    """Draft a profile + fixture from one device and its cached properties.
+
+    When builtin_driver names an existing Python driver (for example "hood"),
+    the YAML inherits it with extends: python:<name> and only the properties
+    that driver does not already expose become sensor entries.  builtin_keys
+    is the explicit key set of that driver; when omitted, it is resolved from
+    the driver registry if that is importable.
+    """
+    return _draft(
+        device,
+        properties,
+        source="auto",
+        expect_fn=expect_fn,
+        builtin_driver=builtin_driver,
+        builtin_keys=builtin_keys,
+    )
 
 
 def draft_from_bundle(

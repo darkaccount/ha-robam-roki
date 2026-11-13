@@ -187,7 +187,8 @@
           "levels": "档位列表（逗号分隔）",
           "max_level": "未知型号的档位数量（2-6）",
           "scan_interval": "轮询间隔（秒）",
-          "enable_sse": "启用实时推送（SSE/MQTT）"
+          "enable_sse": "启用实时推送（SSE/MQTT）",
+          "countdown_auto_off": "倒计时结束后自动关机（设备本身只会蜂鸣提醒）"
         }
       }
     }

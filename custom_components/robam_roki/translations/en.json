@@ -187,7 +187,8 @@
           "levels": "Fan levels (comma separated)",
           "max_level": "Level count for unknown models (2-6)",
           "scan_interval": "Polling interval (seconds)",
-          "enable_sse": "Enable real-time push (SSE/MQTT)"
+          "enable_sse": "Enable real-time push (SSE/MQTT)",
+          "countdown_auto_off": "Turn the hood off when the countdown ends (the appliance itself only beeps)"
         }
       }
     }

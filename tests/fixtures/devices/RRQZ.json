@@ -1,0 +1,28 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "hand",
+  "note": "Synthetic payload written by hand for the P3-F profile migration; NOT a real device capture.",
+  "match": {
+    "dc": "RRQZ"
+  },
+  "properties": {
+    "stoveHeadLeftPower": 3,
+    "stoveHeadRightPower": 6,
+    "stoveHeadLeftRemainingTime": 0,
+    "stoveHeadRightRemainingTime": 30,
+    "stoveHeadLeftWorkStatus": 1,
+    "stoveHeadRightWorkStatus": 3,
+    "stoveHeadLeftAlarmStatus": 0,
+    "stoveHeadRightAlarmStatus": 0
+  },
+  "expect": {
+    "left_head_level": 3,
+    "right_head_level": 6,
+    "left_head_remaining_time": 0,
+    "right_head_remaining_time": 30,
+    "left_head_status": "待机",
+    "right_head_status": "定时中",
+    "left_head_alarm": false,
+    "right_head_alarm": false
+  }
+}

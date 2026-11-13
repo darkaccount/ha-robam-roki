@@ -1,0 +1,46 @@
+# Built-in profile for ROBAM / ROKI water purifiers (净水器, dc: RJSQ).
+#
+# P3-F replaced the hand-written WaterPurifierDriver with this profile.  Entity
+# set, keys, order, icons, units and state classes are the ones that driver
+# exposed: the behaviour is pinned by tests/fixtures/behavior/RJSQ.json,
+# captured from the driver before the migration, and by
+# tests/fixtures/devices/RJSQ.json.
+#
+# Profiles are read-only telemetry: this file never adds a control.
+#
+# This directory belongs to the integration and is replaced on every update;
+# put your own profiles in <Home Assistant config>/robam_roki/profiles/.
+schema: roki-profile/1
+id: water-purifier
+name: 净水器
+match:
+  dc: RJSQ
+sensors:
+  input_tds:
+    keys: [input_tds, inTds]
+    icon: mdi:water-opacity
+    state_class: measurement
+    unit: ppm
+  output_tds:
+    keys: [output_tds, outTds, currentTDSValue]
+    icon: mdi:water-check
+    state_class: measurement
+    unit: ppm
+  filter_life_1:
+    keys: [filter1, filterLife1]
+    icon: mdi:filter-outline
+    unit: "%"
+  filter_life_2:
+    keys: [filter2, filterLife2]
+    icon: mdi:filter-outline
+    unit: "%"
+binary_sensors:
+  purifying:
+    keys: [purifying, workStatus]
+    on_values: [1, "1"]
+    device_class: running
+  leak_alarm:
+    keys: [leakAlarm]
+    on_values: [1, "1"]
+    device_class: moisture
+    entity_category: diagnostic

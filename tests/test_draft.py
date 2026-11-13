@@ -98,6 +98,7 @@ def test_controls_block_is_entirely_commented() -> None:
     result = draft.draft_from_properties(DEVICE, PROPERTIES)
     document = _loaded(result)
     assert "controls" not in document
+    assert "extends" not in document
     comment_lines = [
         line for line in result.profile_yaml.splitlines() if line.lstrip().startswith("#")
     ]
@@ -186,6 +187,88 @@ def test_expect_fn_returning_a_non_mapping_warns() -> None:
     )
     assert result.fixture["expect"] == {}
     assert any("not a mapping" in warning for warning in result.warnings)
+
+
+# -- draft hygiene: aliases, metadata, builtin drivers -------------------
+
+
+def test_alias_spellings_become_one_sensor_entry() -> None:
+    # REST and legacy payloads spell the same field differently; one entity
+    # with both fallback keys is enough.
+    result = draft.draft_from_properties(
+        DEVICE, {"workStatus": 1, "working_status": 1, "level": 2}
+    )
+    sensors = _loaded(result)["sensors"]
+    assert list(sensors) == ["level", "workStatus"]
+    assert sensors["workStatus"] == {
+        "keys": ["workStatus", "working_status"],
+        "type": "int",
+    }
+
+
+def test_alias_group_uses_the_first_non_null_value() -> None:
+    result = draft.draft_from_properties(
+        DEVICE, {"working_status": None, "workStatus": 1}
+    )
+    sensors = _loaded(result)["sensors"]
+    assert sensors["workStatus"]["type"] == "int"
+
+
+def test_protocol_metadata_is_skipped_with_a_comment() -> None:
+    properties = {
+        "level": 2,
+        "lastUpdateTime": 1699999999,
+        "msgId": 7,
+        "timestamp": "ignored",
+        "responseMessageType": 1,
+    }
+    result = draft.draft_from_properties(DEVICE, properties)
+    sensors = _loaded(result)["sensors"]
+    assert list(sensors) == ["level"]
+    assert (
+        "# skipped protocol metadata: lastUpdateTime, msgId, "
+        "responseMessageType, timestamp"
+    ) in result.profile_yaml
+    assert any(
+        "skipped protocol metadata" in warning for warning in result.warnings
+    )
+    # The fixture keeps the full captured payload for regression checks.
+    assert set(result.fixture["properties"]) == set(properties)
+
+
+def test_builtin_driver_adds_extends_and_hides_covered_keys() -> None:
+    properties = {
+        "workStatus": 1,
+        "lightStatus": 1,
+        "level": 2,
+        "faultCode": 0,
+    }
+    result = draft.draft_from_properties(
+        DEVICE,
+        properties,
+        builtin_driver="hood",
+        builtin_keys={"work_status", "fault_code", "clean_required"},
+    )
+    document = _loaded(result)
+    assert document["extends"] == "python:hood"
+    sensors = document.get("sensors") or {}
+    assert list(sensors) == ["level", "lightStatus"]
+    assert "workStatus" not in sensors
+    assert "faultCode" not in sensors
+    assert "# extends python:hood" in result.profile_yaml
+    assert "# covered and skipped: faultCode, workStatus" in result.profile_yaml
+    # The fixture still stores the whole captured payload.
+    assert result.fixture["properties"] == properties
+
+
+def test_builtin_driver_without_a_key_set_does_not_crash() -> None:
+    # The CLI cannot resolve a driver, so it never passes one; a plain name
+    # without keys must still produce a valid profile.
+    result = draft.draft_from_properties(
+        DEVICE, {"level": 1}, builtin_driver="hood"
+    )
+    document = _loaded(result)
+    assert document["extends"] == "python:hood"
 
 
 # -- from a bundle -------------------------------------------------------

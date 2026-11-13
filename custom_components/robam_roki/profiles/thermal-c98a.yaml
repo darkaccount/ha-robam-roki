@@ -1,0 +1,25 @@
+# Built-in model override for the C98A-D3P steam oven family (蒸烤一体机).
+#
+# The Python thermal base (devices/thermal.py, extended as python:thermal) stays
+# the source of every entity spec; this profile names the model and, by
+# matching a specific dt, gives that model a profile of its own.  It adds,
+# removes and re-values nothing: tests/fixtures/behavior/RZKY.json pins that the
+# entities are byte-for-byte the ones the Python base produces, and
+# tests/fixtures/devices/RZKY-98AD3.json is a real capture from this
+# model.
+#
+# Use it as the starting point for a model-specific tweak:
+#   * add a sensor block with only presentation fields (name / icon / unit /
+#     device_class / state_class / entity_category) to relabel an entity;
+#   * add "keys:" to replace which property feeds an entity;
+#   * add a block with a key the base does not have to expose an extra property.
+#
+# This directory belongs to the integration and is replaced on every update;
+# put your own profiles in <Home Assistant config>/robam_roki/profiles/.
+schema: roki-profile/1
+id: thermal-c98a
+extends: python:thermal
+match:
+  dc: RZKY
+  dt: 98AD3
+name: 蒸烤一体机 C98A-D3P

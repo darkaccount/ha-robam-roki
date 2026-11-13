@@ -1,0 +1,32 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "hand",
+  "note": "Synthetic payload written by hand for the P3-F thermal YAML override; NOT a real device capture.",
+  "match": {
+    "dc": "RZQL"
+  },
+  "properties": {
+    "workState": 1,
+    "powerState": 2,
+    "curTopTemp": 60,
+    "curButtomTemp": 55,
+    "stageTotalNum": 0,
+    "curStageNum": 1,
+    "doorState": 0,
+    "faultCode": 0,
+    "lightSwitch": 0
+  },
+  "expect": {
+    "work_status": "待机",
+    "current_temperature": 60.0,
+    "top_temperature": 60.0,
+    "bottom_temperature": 55.0,
+    "target_temperature": null,
+    "remaining_time": null,
+    "stage": "单段",
+    "estimated_power": 0,
+    "door": false,
+    "alarm": false,
+    "light": false
+  }
+}

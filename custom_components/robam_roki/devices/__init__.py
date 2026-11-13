@@ -6,12 +6,11 @@ import logging
 from typing import Any
 
 from ..profiles import Profile, match_profile
+from ..redact import mask_guid
 from .base import BinarySensorSpec, RokiDeviceDriver, SensorSpec
-from .dishwasher import DishwasherDriver
 from .generic import GenericDriver
 from .hood import HoodDriver
 from .profile import ProfileDriver
-from .stove import StoveDriver
 from .thermal import (
     MicrowaveDriver,
     OvenDriver,
@@ -19,16 +18,17 @@ from .thermal import (
     SterilizerDriver,
     ThermalCookerDriver,
 )
-from .water_purifier import WaterPurifierDriver
 
 _LOGGER = logging.getLogger(__name__)
 
 # Registry mapping device category code (dc) to Driver classes
+#
+# The stove (RRQZ), dishwasher (RXWJ) and water purifier (RJSQ) are not listed:
+# their telemetry is declared in custom_components/robam_roki/profiles/*.yaml
+# and served by ProfileDriver.  A category that has neither a registration nor
+# a profile falls back to GenericDriver, which exposes the raw properties.
 DRIVER_REGISTRY: dict[str, type[RokiDeviceDriver]] = {
     "RYYJ": HoodDriver,
-    "RRQZ": StoveDriver,
-    "RXWJ": DishwasherDriver,
-    "RJSQ": WaterPurifierDriver,
     "RZQL": SteamOvenDriver,
     "RZKY": SteamOvenDriver,
     "RDKX": OvenDriver,
@@ -47,9 +47,6 @@ PYTHON_DRIVERS: dict[str, type[RokiDeviceDriver]] = {
     "oven": OvenDriver,
     "microwave": MicrowaveDriver,
     "sterilizer": SterilizerDriver,
-    "stove": StoveDriver,
-    "dishwasher": DishwasherDriver,
-    "water_purifier": WaterPurifierDriver,
     "generic": GenericDriver,
 }
 
@@ -88,11 +85,20 @@ def _match_device_profile(
     if not profiles:
         return None
     try:
-        return match_profile(device, profiles)
+        profile = match_profile(device, profiles)
+        if profile is not None:
+            _LOGGER.debug(
+                "device %s (dc=%s dt=%s) matched profile %s",
+                mask_guid(str(device.get("guid") or "")),
+                device.get("dc") or "?",
+                device.get("dt") or "?",
+                getattr(profile, "id", "?"),
+            )
+        return profile
     except Exception as err:  # noqa: BLE001 - a bad profile must not break setup
         _LOGGER.warning(
             "profile matching failed for device %s: %s",
-            device.get("guid"),
+            mask_guid(str(device.get("guid") or "")),
             err,
         )
         return None
@@ -152,7 +158,6 @@ def get_driver_for_device(coordinator: Any, device: dict[str, Any]) -> RokiDevic
 __all__ = [
     "PYTHON_DRIVERS",
     "BinarySensorSpec",
-    "DishwasherDriver",
     "GenericDriver",
     "HoodDriver",
     "MicrowaveDriver",
@@ -162,7 +167,5 @@ __all__ = [
     "SensorSpec",
     "SteamOvenDriver",
     "SterilizerDriver",
-    "StoveDriver",
-    "WaterPurifierDriver",
     "get_driver_for_device",
 ]

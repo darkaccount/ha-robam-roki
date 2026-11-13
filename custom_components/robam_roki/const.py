@@ -33,6 +33,27 @@ DEFAULT_ENABLE_SSE = True
 # only the hood panel entry point, not the app-wide limit.
 MAX_COUNTDOWN_MINUTES = 240
 
+# Countdown auto-off.  The appliance's own timer (command 144) only beeps at
+# the deadline and keeps running; the app sends the off command itself, so the
+# integration schedules it locally from a local deadline.
+CONF_COUNTDOWN_AUTO_OFF = "countdown_auto_off"
+DEFAULT_COUNTDOWN_AUTO_OFF = True
+
+# The countdown entity redraws itself on this interval while a timer runs, so
+# the display walks down even when no poll comes in.
+COUNTDOWN_TICK_SECONDS = 15
+
+# After our own command the device may still report a stale snapshot; timing
+# reports are ignored for this long (measured: 280 ms stale, 30 s to settle).
+COUNTDOWN_COMMAND_GRACE_SECONDS = 20.0
+
+# An empty property snapshot keeps the previous state for this long, so a
+# transient poll failure does not flip every entity to unavailable.
+COUNTDOWN_EMPTY_GRACE_SECONDS = 5.0
+
+# Reports within this many minutes of the local deadline only refine it.
+COUNTDOWN_TOLERANCE_MINUTES = 1
+
 # A hood is considered offline after this many unanswered polls.  The app uses
 # six consecutive failures (AbsDevice.onCheckConnection) at a 2 s foreground /
 # 10 s background poll, i.e. roughly 12-60 s.

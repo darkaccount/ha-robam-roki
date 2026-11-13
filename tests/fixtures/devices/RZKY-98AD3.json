@@ -1,0 +1,35 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "user",
+  "match": {
+    "dc": "RZKY",
+    "dt": "98AD3"
+  },
+  "properties": {
+    "workState": 2,
+    "powerState": 2,
+    "curTopTemp": 140,
+    "curButtomTemp": 96,
+    "curStageNum": 1,
+    "stageTotalNum": 0,
+    "stageOneSetTopTemp": 160,
+    "stageOneSetButtomTemp": 160,
+    "totalRemainSeonds": 1800,
+    "doorState": 0,
+    "faultCode": 0,
+    "lightSwitch": 1
+  },
+  "expect": {
+    "work_status": "预热中",
+    "current_temperature": 140,
+    "top_temperature": 140,
+    "bottom_temperature": 96,
+    "target_temperature": 160,
+    "remaining_time": 30,
+    "stage": "单段",
+    "estimated_power": 2833,
+    "door": false,
+    "alarm": false,
+    "light": true
+  }
+}

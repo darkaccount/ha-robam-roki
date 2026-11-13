@@ -626,6 +626,47 @@ def test_same_precision_conflict_picks_first_by_file_name(
     )
 
 
+def test_conflict_warning_is_emitted_only_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    profiles.reset_conflict_warnings()
+    directory = tmp_path / "profiles"
+    _write(directory, "b-first.yaml", MINIMAL)
+    _write(directory, "c-second.yaml", MINIMAL)
+    resolved = profiles.resolve_extends(
+        profiles.load_profile_dir(directory, "builtin")
+    )
+
+    with caplog.at_level(logging.WARNING):
+        profiles.match_profile({"dc": "RZQL"}, resolved)
+        profiles.match_profile({"dc": "RZQL"}, resolved)
+    warnings = [
+        record for record in caplog.records
+        if "profile conflict" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        profiles.match_profile({"dc": "RZQL"}, resolved)
+    assert not [
+        record for record in caplog.records
+        if "profile conflict" in record.getMessage()
+    ]
+
+    # The test hook makes the next conflict reportable again.
+    profiles.reset_conflict_warnings()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        profiles.match_profile({"dc": "RZQL"}, resolved)
+    assert len(
+        [
+            record for record in caplog.records
+            if "profile conflict" in record.getMessage()
+        ]
+    ) == 1
+
+
 def test_match_requires_the_same_dc_and_a_dc(tmp_path: Path) -> None:
     resolved = profiles.resolve_extends(_builtin(tmp_path, MINIMAL, "p.yaml"))
     assert profiles.match_profile({"dc": "RYYJ"}, resolved) is None

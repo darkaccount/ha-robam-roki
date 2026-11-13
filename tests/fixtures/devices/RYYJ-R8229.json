@@ -1,0 +1,20 @@
+{
+  "schema": "roki-fixture/1",
+  "source": "user",
+  "match": {
+    "dc": "RYYJ",
+    "dt": "R8229"
+  },
+  "properties": {
+    "workStatus": 1,
+    "level": 2,
+    "lightStatus": 0,
+    "cleanRequired": 0,
+    "timing": 15
+  },
+  "expect": {
+    "work_status": "延时关机",
+    "fault_code": null,
+    "clean_required": false
+  }
+}

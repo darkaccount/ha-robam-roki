@@ -1,0 +1,253 @@
+{
+  "schema": "roki-behavior/1",
+  "dc": "RXWJ",
+  "note": "Golden behaviour baseline: the entities the pre-migration driver produced for these payloads. Regenerate only for a deliberate behaviour change (python tests/behavior_snapshot.py).",
+  "baseline": {
+    "captured_from": "python driver",
+    "driver": "DishwasherDriver",
+    "profile_id": null,
+    "python_base": null,
+    "builtin_profiles": [
+      "thermal-override.yaml"
+    ]
+  },
+  "cases": [
+    {
+      "id": "dishwasher_telemetry",
+      "source": "tests/test_drivers.py::test_dishwasher_driver_telemetry",
+      "device": {
+        "dc": "RXWJ"
+      },
+      "properties": {
+        "workStatus": 2,
+        "remainTime": 45,
+        "workMode": "强力洗",
+        "doorOpen": 0,
+        "lackSalt": 1,
+        "lackRinse": 0
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:dishwasher",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "工作中",
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-sand",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 45,
+          "attrs": {}
+        },
+        "work_mode": {
+          "translation_key": "work_mode",
+          "name": null,
+          "icon": "mdi:silverware-clean",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "强力洗",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": false,
+          "attrs": {}
+        },
+        "lack_salt": {
+          "translation_key": "lack_salt",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        },
+        "lack_rinse": {
+          "translation_key": "lack_rinse",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "dishwasher_legacy_keys",
+      "source": "the DishWasher* key spelling the former driver also accepted",
+      "device": {
+        "dc": "RXWJ"
+      },
+      "properties": {
+        "DishWasherStatus": 4,
+        "DishWasherRemainingWorkingTime": 12,
+        "DishWasherWorkMode": "eco",
+        "DishWasherDoorValue": 1,
+        "lackSalt": 0,
+        "lackRinse": 1
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:dishwasher",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "预约中",
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-sand",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 12,
+          "attrs": {}
+        },
+        "work_mode": {
+          "translation_key": "work_mode",
+          "name": null,
+          "icon": "mdi:silverware-clean",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "eco",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": true,
+          "attrs": {}
+        },
+        "lack_salt": {
+          "translation_key": "lack_salt",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "lack_rinse": {
+          "translation_key": "lack_rinse",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": true,
+          "attrs": {}
+        }
+      }
+    },
+    {
+      "id": "dishwasher_unknown_status",
+      "source": "a status code outside the documented map",
+      "device": {
+        "dc": "RXWJ"
+      },
+      "properties": {
+        "workStatus": 9,
+        "remainTime": 0,
+        "workMode": "unknown",
+        "doorOpen": 0,
+        "lackSalt": 0,
+        "lackRinse": 0
+      },
+      "sensors": {
+        "work_status": {
+          "translation_key": "work_status",
+          "name": null,
+          "icon": "mdi:dishwasher",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "未知",
+          "attrs": {}
+        },
+        "remaining_time": {
+          "translation_key": "remaining_time",
+          "name": null,
+          "icon": "mdi:timer-sand",
+          "device_class": "duration",
+          "state_class": null,
+          "unit": "min",
+          "entity_category": null,
+          "value": 0,
+          "attrs": {}
+        },
+        "work_mode": {
+          "translation_key": "work_mode",
+          "name": null,
+          "icon": "mdi:silverware-clean",
+          "device_class": null,
+          "state_class": null,
+          "unit": null,
+          "entity_category": null,
+          "value": "unknown",
+          "attrs": {}
+        }
+      },
+      "binary_sensors": {
+        "door": {
+          "translation_key": "door",
+          "name": null,
+          "icon": null,
+          "device_class": "door",
+          "entity_category": null,
+          "value": false,
+          "attrs": {}
+        },
+        "lack_salt": {
+          "translation_key": "lack_salt",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        },
+        "lack_rinse": {
+          "translation_key": "lack_rinse",
+          "name": null,
+          "icon": null,
+          "device_class": "problem",
+          "entity_category": "diagnostic",
+          "value": false,
+          "attrs": {}
+        }
+      }
+    }
+  ]
+}

@@ -631,7 +631,8 @@ def test_load_profiles_reports_builtin_and_missing_user_dir(
     assert "thermal-override" in by_id
     assert by_id["thermal-override"].python_base == "thermal"
     messages = "\n".join(record.getMessage() for record in caplog.records)
-    assert "profiles: builtin=1 user=0" in messages
+    builtin_count = len(list((COMPONENT / "profiles").glob("*.yaml")))
+    assert f"profiles: builtin={builtin_count} user=0" in messages
     assert "(missing)" in messages
 
 
@@ -663,7 +664,8 @@ def test_load_profiles_picks_up_the_user_directory(
     assert "mine" in by_id
     assert "thermal-override" in by_id
     messages = "\n".join(record.getMessage() for record in caplog.records)
-    assert "profiles: builtin=1 user=1" in messages
+    builtin_count = len(list((COMPONENT / "profiles").glob("*.yaml")))
+    assert f"profiles: builtin={builtin_count} user=1" in messages
     assert "(missing)" not in messages
 
 

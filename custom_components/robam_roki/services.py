@@ -21,7 +21,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
-from .devices import get_driver_for_device
+from .devices import PYTHON_DRIVERS, get_driver_for_device
 from .draft import DraftResult, draft_from_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,16 +131,40 @@ def _select_device(
     )
 
 
-def _expect_properties(
-    coordinator: Any, device: dict[str, Any], properties: dict[str, Any]
-) -> dict[str, Any]:
-    """Expected entity values computed with the device's current driver."""
+def _build_driver(
+    coordinator: Any, device: dict[str, Any]
+) -> Any | None:
+    """The device's current driver, or None when it cannot be built."""
     try:
-        driver = get_driver_for_device(coordinator, device)
+        return get_driver_for_device(coordinator, device)
     except Exception as err:  # noqa: BLE001 - a draft must not fail here
         _LOGGER.warning("could not build the driver for the draft: %s", err)
-        return {}
+        return None
+
+
+def _builtin_driver(driver: Any) -> tuple[str | None, frozenset[str] | None]:
+    """Name and entity keys of the built-in Python driver behind this driver.
+
+    A driver generated from a profile is not in the registry, so it gets no
+    extends line: the draft itself is the replacement profile.
+    """
+    if driver is None:
+        return None, None
+    for name, driver_cls in PYTHON_DRIVERS.items():
+        if type(driver) is driver_cls:
+            keys = {spec.key for spec in driver.sensors()}
+            keys |= {spec.key for spec in driver.binary_sensors()}
+            return name, frozenset(keys)
+    return None, None
+
+
+def _expect_values(
+    driver: Any, properties: dict[str, Any]
+) -> dict[str, Any]:
+    """Expected entity values computed with the device's current driver."""
     expect: dict[str, Any] = {}
+    if driver is None:
+        return expect
     for spec in driver.sensors():
         if spec.value_fn is not None:
             try:
@@ -181,30 +205,34 @@ def _unique_paths(
 
 
 def _write_draft(
-    hass: HomeAssistant,
-    result: DraftResult,
+    config_dir: str,
+    dc: str,
+    dt: str,
+    profile_yaml: str,
+    fixture: dict[str, Any],
     write_fixture: bool,
-) -> tuple[Path, Path | None]:
-    match = result.fixture.get("match") or {}
-    dc = str(match.get("dc") or "unknown")
-    dt = str(match.get("dt") or "unknown")
-    config_dir = Path(hass.config.path())
-    profile_dir = config_dir / CONFIG_SUBDIR / PROFILES_SUBDIR
-    fixture_dir = config_dir / CONFIG_SUBDIR / FIXTURES_SUBDIR
+) -> tuple[str, str | None]:
+    """Write the draft files; always called in the executor.
+
+    All blocking work (mkdir, json.dumps, write_text) lives here so the event
+    loop never sees it -- Home Assistant flags those calls otherwise.
+    """
+    profile_dir = Path(config_dir) / CONFIG_SUBDIR / PROFILES_SUBDIR
+    fixture_dir = Path(config_dir) / CONFIG_SUBDIR / FIXTURES_SUBDIR
     profile_path, fixture_path = _unique_paths(
         profile_dir, fixture_dir, dc, dt, write_fixture
     )
     profile_dir.mkdir(parents=True, exist_ok=True)
-    profile_path.write_text(result.profile_yaml, encoding="utf-8")
-    written_fixture: Path | None = None
+    profile_path.write_text(profile_yaml, encoding="utf-8")
+    written_fixture: str | None = None
     if write_fixture:
         fixture_dir.mkdir(parents=True, exist_ok=True)
         fixture_path.write_text(
-            json.dumps(result.fixture, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(fixture, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        written_fixture = fixture_path
-    return profile_path, written_fixture
+        written_fixture = str(fixture_path)
+    return str(profile_path), written_fixture
 
 
 def _notify_success(
@@ -212,6 +240,7 @@ def _notify_success(
     profile_path: Path,
     fixture_path: Path | None,
     result: DraftResult,
+    builtin_driver: str | None = None,
 ) -> None:
     """Paths and the next step first, then the whole YAML as an appendix."""
     lines = [
@@ -226,6 +255,11 @@ def _notify_success(
             "  注意：controls 段为注释，本版本不会发送任何控制命令",
         ]
     )
+    if builtin_driver:
+        lines.append(
+            "  继承：已继承内置驱动 python:"
+            f"{builtin_driver}，草稿只补充驱动未覆盖的新键"
+        )
     for warning in result.warnings:
         lines.append(f"  警告：{warning}")
     lines.extend(
@@ -262,20 +296,43 @@ async def _async_draft_profile(hass: HomeAssistant, call: ServiceCall) -> None:
 
     coordinator = selected.coordinator
     cached = (coordinator.data or {}).get(selected.guid) or {}
+    driver = _build_driver(coordinator, selected.device)
+    builtin_driver, builtin_keys = _builtin_driver(driver)
 
     def expect_fn(properties: dict[str, Any]) -> dict[str, Any]:
         # Read-only: only the coordinator cache and the driver's own logic.
-        return _expect_properties(coordinator, selected.device, properties)
+        return _expect_values(driver, properties)
 
-    result = draft_from_properties(selected.device, cached, expect_fn=expect_fn)
+    result = draft_from_properties(
+        selected.device,
+        cached,
+        expect_fn=expect_fn,
+        builtin_driver=builtin_driver,
+        builtin_keys=builtin_keys,
+    )
     if not result.profile_yaml:
         raise ServiceValidationError(
             "could not draft a profile: " + "; ".join(result.warnings)
         )
 
+    match = result.fixture.get("match") or {}
+    dc = str(match.get("dc") or "unknown")
+    dt = str(match.get("dt") or "unknown")
     try:
-        profile_path, fixture_path = _write_draft(hass, result, write_fixture)
+        profile_path_text, fixture_path_text = await hass.async_add_executor_job(
+            _write_draft,
+            str(hass.config.path()),
+            dc,
+            dt,
+            result.profile_yaml,
+            result.fixture,
+            write_fixture,
+        )
     except OSError as err:
         _notify_failure(hass, str(err))
         return
-    _notify_success(hass, profile_path, fixture_path, result)
+    profile_path = Path(profile_path_text)
+    fixture_path = Path(fixture_path_text) if fixture_path_text else None
+    _notify_success(
+        hass, profile_path, fixture_path, result, builtin_driver
+    )

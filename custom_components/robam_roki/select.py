@@ -124,7 +124,9 @@ class RokiHoodGearSelect(RokiEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         if option == OFF_OPTION:
             try:
-                await self.coordinator.async_set_power(self._device_id, False)
+                await self.coordinator.async_execute(
+                    self._device_id, "power", on=False
+                )
             except RokiAuthError as err:
                 raise HomeAssistantError(f"ROKI session expired: {err}") from err
             except RokiError as err:
@@ -145,8 +147,12 @@ class RokiHoodGearSelect(RokiEntity, SelectEntity):
         level = levels[names.index(option)]
         try:
             if not self.is_on:
-                await self.coordinator.async_set_power(self._device_id, True)
-            await self.coordinator.async_set_level(self._device_id, level)
+                await self.coordinator.async_execute(
+                    self._device_id, "power", on=True
+                )
+            await self.coordinator.async_execute(
+                self._device_id, "level", level=level
+            )
         except RokiAuthError as err:
             raise HomeAssistantError(f"ROKI session expired: {err}") from err
         except RokiError as err:

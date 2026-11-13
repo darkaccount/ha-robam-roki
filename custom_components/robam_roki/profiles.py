@@ -170,6 +170,17 @@ def _clean_str(value: Any) -> str | None:
     return text or None
 
 
+#: Conflict warnings already emitted, keyed by the device dc and the sorted
+#: profile ids involved.  match_profile runs for every entity of every device,
+#: so without this cache one ambiguous profile pair floods the log.
+_EMITTED_CONFLICTS: set[tuple[str, tuple[str, ...]]] = set()
+
+
+def reset_conflict_warnings() -> None:
+    """Forget which conflicts were warned about (used by tests)."""
+    _EMITTED_CONFLICTS.clear()
+
+
 #: YAML 1.1 parses the bare words on/off/yes/no as booleans.  Profiles are
 #: written by hand, so a control written as "on:" arrives as the True key and
 #: "param: on" arrives as the True scalar.  Both are normalised back to the
@@ -780,11 +791,18 @@ def match_profile(device: dict[str, Any], profiles: list[Profile]) -> Profile | 
         if precision == best_precision and profile.source == best.source
     ]
     if tied:
-        _warn(
-            "profile conflict: %s and %s match device %s equally well, using %s",
-            best.id,
-            ", ".join(profile.id for profile in tied),
+        conflict_key = (
             device_dc,
-            best.id,
+            tuple(sorted({best.id, *(profile.id for profile in tied)})),
         )
+        if conflict_key not in _EMITTED_CONFLICTS:
+            _EMITTED_CONFLICTS.add(conflict_key)
+            _warn(
+                "profile conflict: %s and %s match device %s equally well, "
+                "using %s",
+                best.id,
+                ", ".join(profile.id for profile in tied),
+                device_dc,
+                best.id,
+            )
     return best

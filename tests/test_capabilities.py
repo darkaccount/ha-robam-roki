@@ -14,16 +14,13 @@ from typing import Any, get_args
 import pytest
 
 from custom_components.robam_roki.devices import (
-    DishwasherDriver,
     GenericDriver,
     HoodDriver,
     MicrowaveDriver,
     OvenDriver,
     SteamOvenDriver,
     SterilizerDriver,
-    StoveDriver,
     ThermalCookerDriver,
-    WaterPurifierDriver,
     get_driver_for_device,
 )
 from custom_components.robam_roki.devices.base import (
@@ -184,9 +181,9 @@ def test_hood_command_specs_describe_the_protocol():
 @pytest.mark.parametrize(
     ("driver_cls", "dc", "guid"),
     [
-        (StoveDriver, "RRQZ", "RRQZ000000000001"),
-        (DishwasherDriver, "RXWJ", "RXWJ000000000001"),
-        (WaterPurifierDriver, "RJSQ", "RJSQ000000000001"),
+        # The stove / dishwasher / water purifier are built from a YAML profile
+        # since P3-F; a ProfileDriver never exposes a command either, which
+        # tests/test_profile_driver.py pins.
         (SteamOvenDriver, "RZQL", "RZQL000000000001"),
         (SteamOvenDriver, "RZKY", "RZKY000000000001"),
         (OvenDriver, "RDKX", "RDKX000000000001"),

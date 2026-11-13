@@ -1,0 +1,56 @@
+# Built-in profile for ROBAM / ROKI dishwashers (洗碗机, dc: RXWJ).
+#
+# P3-F replaced the hand-written DishwasherDriver with this profile.  Entity
+# set, keys, order, icons, units and the seven-state work status table are the
+# ones that driver exposed: the behaviour is pinned by
+# tests/fixtures/behavior/RXWJ.json, captured from the driver before the
+# migration, and by tests/fixtures/devices/RXWJ.json.
+#
+# Profiles are read-only telemetry: this file never adds a control.
+#
+# This directory belongs to the integration and is replaced on every update;
+# put your own profiles in <Home Assistant config>/robam_roki/profiles/.
+schema: roki-profile/1
+id: dishwasher
+name: 洗碗机
+match:
+  dc: RXWJ
+sensors:
+  # default 未知 on purpose: a dishwasher that reports no status property must
+  # not be shown as 关机 (see profiles/stove.yaml for the same reasoning).
+  work_status:
+    keys: [workStatus, DishWasherStatus]
+    type: int
+    icon: mdi:dishwasher
+    map:
+      0: 关机
+      1: 待机
+      2: 工作中
+      3: 暂停
+      4: 预约中
+      5: 完成
+      6: 故障
+    default: 未知
+  remaining_time:
+    keys: [remainTime, DishWasherRemainingWorkingTime]
+    icon: mdi:timer-sand
+    device_class: duration
+    unit: min
+  work_mode:
+    keys: [workMode, DishWasherWorkMode]
+    icon: mdi:silverware-clean
+binary_sensors:
+  door:
+    keys: [doorOpen, DishWasherDoorValue]
+    on_values: [1, "1"]
+    device_class: door
+  lack_salt:
+    keys: [lackSalt]
+    on_values: [1, "1"]
+    device_class: problem
+    entity_category: diagnostic
+  lack_rinse:
+    keys: [lackRinse]
+    on_values: [1, "1"]
+    device_class: problem
+    entity_category: diagnostic

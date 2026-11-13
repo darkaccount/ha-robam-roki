@@ -41,6 +41,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # check_fixtures.py diffs two revisions, so it needs the history.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
@@ -51,6 +54,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio cryptography aiohttp yarl pyyaml
+
+      - name: Check changed profiles have fixtures
+        run: |
+          python tools/check_fixtures.py --base HEAD~1 --head HEAD
 
       - name: Run tests
         run: |

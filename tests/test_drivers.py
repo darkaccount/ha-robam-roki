@@ -1,20 +1,22 @@
-"""Test device driver layer, factories, and telemetry parsing across all categories."""
+"""Test the Python device drivers, factories and telemetry parsing.
+
+The categories served by a built-in YAML profile (stove, dishwasher, water
+purifier, and the thermal family through its model overrides) are covered by
+tests/test_behavior_golden.py instead.
+"""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 from custom_components.robam_roki.devices import (
-    DishwasherDriver,
     GenericDriver,
     HoodDriver,
     MicrowaveDriver,
     OvenDriver,
     SteamOvenDriver,
     SterilizerDriver,
-    StoveDriver,
     ThermalCookerDriver,
-    WaterPurifierDriver,
     get_driver_for_device,
 )
 from custom_components.robam_roki.devices.thermal import (
@@ -28,9 +30,13 @@ def test_driver_factory_resolution():
     coordinator = MagicMock()
 
     assert isinstance(get_driver_for_device(coordinator, {"dc": "RYYJ"}), HoodDriver)
-    assert isinstance(get_driver_for_device(coordinator, {"dc": "RRQZ"}), StoveDriver)
-    assert isinstance(get_driver_for_device(coordinator, {"dc": "RXWJ"}), DishwasherDriver)
-    assert isinstance(get_driver_for_device(coordinator, {"dc": "RJSQ"}), WaterPurifierDriver)
+    # The stove / dishwasher / water purifier left the registry in P3-F: their
+    # entities come from a built-in YAML profile, so without any profile
+    # loaded (this coordinator has no usable one) they fall back to the raw
+    # telemetry driver.  tests/test_behavior_golden.py covers the profile path.
+    assert isinstance(get_driver_for_device(coordinator, {"dc": "RRQZ"}), GenericDriver)
+    assert isinstance(get_driver_for_device(coordinator, {"dc": "RXWJ"}), GenericDriver)
+    assert isinstance(get_driver_for_device(coordinator, {"dc": "RJSQ"}), GenericDriver)
     assert isinstance(get_driver_for_device(coordinator, {"dc": "RZQL"}), SteamOvenDriver)
     assert isinstance(get_driver_for_device(coordinator, {"dc": "RZKY"}), SteamOvenDriver)
     assert isinstance(get_driver_for_device(coordinator, {"dc": "RDKX"}), OvenDriver)
@@ -63,86 +69,10 @@ def test_hood_driver_work_status():
     }
 
 
-def test_stove_driver_telemetry():
-    coordinator = MagicMock()
-    guid = "RRQZ000000000001"
-    driver = StoveDriver(coordinator, {"guid": guid, "dc": "RRQZ", "dt": "9B39"})
-
-    coordinator.data = {
-        guid: {
-            "stoveHeadLeftPower": 5,
-            "stoveHeadRightPower": 9,
-            "stoveHeadLeftRemainingTime": 15,
-            "stoveHeadRightRemainingTime": 0,
-            "stoveHeadLeftWorkStatus": 2,
-            "stoveHeadRightWorkStatus": 3,
-            "stoveHeadLeftAlarmStatus": 0,
-            "stoveHeadRightAlarmStatus": 1,
-        }
-    }
-
-    sensor_map = {s.key: s for s in driver.sensors()}
-    assert sensor_map["left_head_level"].value_fn(coordinator.data[guid]) == 5
-    assert sensor_map["right_head_level"].value_fn(coordinator.data[guid]) == 9
-    assert sensor_map["left_head_remaining_time"].value_fn(coordinator.data[guid]) == 15
-    assert sensor_map["right_head_status"].value_fn(coordinator.data[guid]) == "定时中"
-
-    bsensor_map = {b.key: b for b in driver.binary_sensors()}
-    assert bsensor_map["left_head_alarm"].is_on_fn(coordinator.data[guid]) is False
-    assert bsensor_map["right_head_alarm"].is_on_fn(coordinator.data[guid]) is True
-
-
-def test_dishwasher_driver_telemetry():
-    coordinator = MagicMock()
-    guid = "RXWJ000000000001"
-    driver = DishwasherDriver(coordinator, {"guid": guid, "dc": "RXWJ"})
-
-    coordinator.data = {
-        guid: {
-            "workStatus": 2,
-            "remainTime": 45,
-            "workMode": "强力洗",
-            "doorOpen": 0,
-            "lackSalt": 1,
-            "lackRinse": 0,
-        }
-    }
-
-    sensor_map = {s.key: s for s in driver.sensors()}
-    assert sensor_map["work_status"].value_fn(coordinator.data[guid]) == "工作中"
-    assert sensor_map["remaining_time"].value_fn(coordinator.data[guid]) == 45
-    assert sensor_map["work_mode"].value_fn(coordinator.data[guid]) == "强力洗"
-
-    bsensor_map = {b.key: b for b in driver.binary_sensors()}
-    assert bsensor_map["door"].is_on_fn(coordinator.data[guid]) is False
-    assert bsensor_map["lack_salt"].is_on_fn(coordinator.data[guid]) is True
-    assert bsensor_map["lack_rinse"].is_on_fn(coordinator.data[guid]) is False
-
-
-def test_water_purifier_telemetry():
-    coordinator = MagicMock()
-    guid = "RJSQ000000000001"
-    driver = WaterPurifierDriver(coordinator, {"guid": guid, "dc": "RJSQ"})
-
-    coordinator.data = {
-        guid: {
-            "input_tds": 250,
-            "output_tds": 12,
-            "filter1": 95,
-            "filter2": 78,
-            "purifying": 1,
-            "leakAlarm": 0,
-        }
-    }
-
-    sensor_map = {s.key: s for s in driver.sensors()}
-    assert sensor_map["input_tds"].value_fn(coordinator.data[guid]) == 250
-    assert sensor_map["output_tds"].value_fn(coordinator.data[guid]) == 12
-    assert sensor_map["filter_life_1"].value_fn(coordinator.data[guid]) == 95
-
-    bsensor_map = {b.key: b for b in driver.binary_sensors()}
-    assert bsensor_map["purifying"].is_on_fn(coordinator.data[guid]) is True
-    assert bsensor_map["leak_alarm"].is_on_fn(coordinator.data[guid]) is False
+# The stove / dishwasher / water purifier telemetry tests moved to
+# tests/test_behavior_golden.py, which compares the *rendered* entities of those
+# (now YAML-driven) categories against tests/fixtures/behavior/<dc>.json -- the
+# golden baseline captured from the Python drivers this file used to test.
 
 
 def test_thermal_cooker_telemetry():

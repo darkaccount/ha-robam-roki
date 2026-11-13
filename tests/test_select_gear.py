@@ -126,6 +126,16 @@ class _FakeCoordinator:
     async def async_set_level(self, device_id: str, level: int) -> None:
         self.calls.append(("level", level))
 
+    async def async_execute(
+        self, device_id: str, capability: str, **kwargs: Any
+    ) -> None:
+        if capability == "power":
+            await self.async_set_power(device_id, kwargs["on"])
+        elif capability == "level":
+            await self.async_set_level(device_id, kwargs["level"])
+        else:
+            raise AssertionError(f"unexpected capability {capability}")
+
     def async_apply(self, device_id: str, properties: dict[str, Any]) -> None:
         self.data.setdefault(device_id, {}).update(properties)
 
